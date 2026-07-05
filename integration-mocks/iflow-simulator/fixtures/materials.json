@@ -1,0 +1,22 @@
+[
+  { "materialId": "MAT-10023456", "productId": "P123", "description": "Gear Housing Assembly", "baseUom": "EA", "materialType": "FERT" },
+  { "materialId": "MAT-10023457", "productId": "P124", "description": "Hydraulic Valve Block", "baseUom": "EA", "materialType": "FERT" },
+  { "materialId": "MAT-10023458", "productId": "P125", "description": "Copper Winding Coil", "baseUom": "EA", "materialType": "ROH" },
+  { "materialId": "MAT-10023459", "productId": "P126", "description": "Bearing Kit 6204", "baseUom": "SET", "materialType": "HALB" },
+  { "materialId": "MAT-10023460", "productId": "P127", "description": "Industrial Fastener Pack", "baseUom": "PK", "materialType": "ROH" },
+  { "materialId": "MAT-10023461", "productId": "P128", "description": "Sensor Mount Bracket", "baseUom": "EA", "materialType": "HALB" },
+  { "materialId": "MAT-10023462", "productId": "P129", "description": "PCB Control Board", "baseUom": "EA", "materialType": "HALB" },
+  { "materialId": "MAT-10023463", "productId": "P130", "description": "Laser-Cut Side Panel", "baseUom": "EA", "materialType": "HALB" },
+  { "materialId": "MAT-10023464", "productId": "P131", "description": "Cooling Fan Module", "baseUom": "EA", "materialType": "FERT" },
+  { "materialId": "MAT-10023465", "productId": "P132", "description": "Drive Shaft Small", "baseUom": "EA", "materialType": "HALB" },
+  { "materialId": "MAT-10023466", "productId": "P133", "description": "Drive Shaft Large", "baseUom": "EA", "materialType": "HALB" },
+  { "materialId": "MAT-10023467", "productId": "P134", "description": "Rubber Seal Set", "baseUom": "SET", "materialType": "ROH" },
+  { "materialId": "MAT-10023468", "productId": "P135", "description": "Motor Core", "baseUom": "EA", "materialType": "FERT" },
+  { "materialId": "MAT-10023469", "productId": "P136", "description": "Power Relay", "baseUom": "EA", "materialType": "ROH" },
+  { "materialId": "MAT-10023470", "productId": "P137", "description": "Cable Harness", "baseUom": "EA", "materialType": "HALB" },
+  { "materialId": "MAT-10023471", "productId": "P138", "description": "Torque Bolt", "baseUom": "EA", "materialType": "ROH" },
+  { "materialId": "MAT-10023472", "productId": "P139", "description": "Protective Enclosure", "baseUom": "EA", "materialType": "FERT" },
+  { "materialId": "MAT-10023473", "productId": "P140", "description": "Packaging Sleeve", "baseUom": "EA", "materialType": "ROH" },
+  { "materialId": "MAT-10023474", "productId": "P141", "description": "Inspection Jig", "baseUom": "EA", "materialType": "HALB" },
+  { "materialId": "MAT-10023475", "productId": "P142", "description": "Label Roll", "baseUom": "RL", "materialType": "ROH" }
+]

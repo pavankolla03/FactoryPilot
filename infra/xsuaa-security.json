@@ -1,0 +1,48 @@
+{
+  "xsappname": "manufacturing-agent",
+  "tenant-mode": "dedicated",
+  "description": "XSUAA security for manufacturing agent",
+  "scopes": [
+    {
+      "name": "$XSAPPNAME.Admin",
+      "description": "Admin access"
+    },
+    {
+      "name": "$XSAPPNAME.Viewer",
+      "description": "Viewer access"
+    }
+  ],
+  "role-templates": [
+    {
+      "name": "Admin",
+      "description": "Full access to all warehouses and admin endpoints",
+      "scope-references": [
+        "$XSAPPNAME.Admin",
+        "$XSAPPNAME.Viewer"
+      ]
+    },
+    {
+      "name": "Viewer",
+      "description": "Restricted warehouse-scoped access",
+      "scope-references": [
+        "$XSAPPNAME.Viewer"
+      ]
+    }
+  ],
+  "role-collections": [
+    {
+      "name": "Admin",
+      "description": "Admin role collection",
+      "role-template-references": [
+        "$XSAPPNAME.Admin"
+      ]
+    },
+    {
+      "name": "Viewer",
+      "description": "Viewer role collection",
+      "role-template-references": [
+        "$XSAPPNAME.Viewer"
+      ]
+    }
+  ]
+}

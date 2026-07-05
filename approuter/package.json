@@ -1,0 +1,23 @@
+{
+  "name": "@manufacturing-agent/approuter",
+  "version": "1.0.0",
+  "private": true,
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "node server.js",
+    "build": "mkdir -p resources && cp -R ../frontend/dist/* resources/",
+    "start": "node server.js",
+    "test": "vitest run --passWithNoTests",
+    "lint": "echo 'No lint rules configured yet'",
+    "format": "prettier --check \"*.json\""
+  },
+  "dependencies": {
+    "@sap/approuter": "^16.7.2"
+  },
+  "devDependencies": {
+    "prettier": "^3.3.3",
+    "vitest": "^2.1.1"
+  }
+}

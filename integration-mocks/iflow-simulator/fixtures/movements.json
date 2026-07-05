@@ -1,0 +1,32 @@
+[
+  {
+    "movementId": "MOV-9001",
+    "productId": "P123",
+    "warehouseId": "1010",
+    "fromLocation": "packing",
+    "toLocation": "shipping",
+    "qty": 12,
+    "timestamp": "2026-07-02T01:30:00.000Z",
+    "status": "confirmed"
+  },
+  {
+    "movementId": "MOV-9002",
+    "productId": "P129",
+    "warehouseId": "1020",
+    "fromLocation": "receiving",
+    "toLocation": "packing",
+    "qty": 10,
+    "timestamp": "2026-07-02T07:45:00.000Z",
+    "status": "confirmed"
+  },
+  {
+    "movementId": "MOV-9003",
+    "productId": "P137",
+    "warehouseId": "1040",
+    "fromLocation": "bulk",
+    "toLocation": "shipping",
+    "qty": 8,
+    "timestamp": "2026-07-02T09:10:00.000Z",
+    "status": "confirmed"
+  }
+]

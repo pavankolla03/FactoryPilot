@@ -1,0 +1,63 @@
+---
+applications:
+  - name: manufacturing-approuter
+    path: ../approuter
+    memory: 256M
+    instances: 1
+    buildpacks:
+      - nodejs_buildpack
+    env:
+      NODE_ENV: production
+      destinations: >-
+        [{"name":"orchestrator","url":"https://manufacturing-orchestrator.${default-domain}","forwardAuthToken":true}]
+    services:
+      - manufacturing-xsuaa
+
+  - name: manufacturing-orchestrator
+    path: ../orchestrator
+    memory: 512M
+    instances: 1
+    buildpacks:
+      - nodejs_buildpack
+    env:
+      NODE_ENV: production
+      PORT: 3000
+      AUTH_MODE: xsuaa
+      LLM_PROVIDER: openai
+      CACHE_TTL_SECONDS: 8640000
+      MCP_SERVERS: >-
+        {"inventory":"https://manufacturing-mcp-inventory.${default-domain}","warehouse-ops":"https://manufacturing-mcp-warehouse-ops.${default-domain}"}
+    services:
+      - manufacturing-xsuaa
+      - manufacturing-postgres
+      - manufacturing-redis
+
+  - name: manufacturing-mcp-inventory
+    path: ../mcp-servers/mcp-inventory
+    memory: 256M
+    instances: 1
+    buildpacks:
+      - nodejs_buildpack
+    env:
+      NODE_ENV: production
+      PORT: 4001
+
+  - name: manufacturing-mcp-warehouse-ops
+    path: ../mcp-servers/mcp-warehouse-ops
+    memory: 256M
+    instances: 1
+    buildpacks:
+      - nodejs_buildpack
+    env:
+      NODE_ENV: production
+      PORT: 4002
+
+  - name: manufacturing-iflow-simulator
+    path: ../integration-mocks/iflow-simulator
+    memory: 256M
+    instances: 1
+    buildpacks:
+      - nodejs_buildpack
+    env:
+      NODE_ENV: production
+      PORT: 4000

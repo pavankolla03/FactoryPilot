@@ -1,0 +1,83 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --color-bg-main: #f5f6f8;
+  --color-bg-sidebar: #14151a;
+  --color-accent-orange: #f5a623;
+  --color-accent-orange-dark: #8a5a1b;
+  --color-badge-peach: #fcebd5;
+  --color-badge-green-bg: #e4f5e4;
+  --color-badge-green-text: #2f7a3d;
+  --color-text-primary: #1a1d21;
+  --color-text-muted: #8a8f98;
+  --color-border-light: #e5e7eb;
+  --radius-card: 14px;
+  --radius-button: 8px;
+}
+
+body {
+  font-family: Inter, system-ui, sans-serif;
+  background: var(--color-bg-main);
+  min-height: 100vh;
+  color: var(--color-text-primary);
+}
+
+#root {
+  min-height: 100vh;
+}
+
+.card {
+  background: #ffffff;
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-card);
+  box-shadow: 0 6px 18px rgba(20, 21, 26, 0.06);
+}
+
+.pill {
+  @apply rounded-full px-3 py-1 text-xs font-semibold;
+}
+
+.sidebar-nav-item {
+  @apply flex items-center gap-3 px-3 py-2 text-sm transition;
+  border-radius: 8px;
+  color: #9ca3af;
+}
+
+.sidebar-nav-item.active {
+  background: #3a2e1b;
+  color: #ffffff;
+  font-weight: 700;
+}
+
+.panel-title {
+  @apply text-lg font-bold;
+  color: var(--color-text-primary);
+}
+
+.kv-row {
+  @apply flex items-center justify-between py-3;
+  border-bottom: 1px solid var(--color-border-light);
+}
+
+.kv-row:last-child {
+  border-bottom: none;
+}
+
+.kv-label {
+  font-size: 14px;
+  color: var(--color-text-muted);
+}
+
+.kv-value {
+  @apply text-sm font-semibold;
+  color: var(--color-text-primary);
+  text-align: right;
+}
+
+.chat-input-shell {
+  background: #171a20;
+  border-radius: 12px;
+  border: 1px solid #1f2430;
+}
