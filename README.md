@@ -52,6 +52,25 @@ flowchart LR
 { "error": { "code": "SCOPE_DENIED", "message": "human readable explanation" } }
 ```
 
+- MCP: the orchestrator talks to both MCP servers with the official `@modelcontextprotocol/sdk`
+  client over Streamable HTTP (`POST /mcp`, stateless mode — a fresh server/transport pair per
+  request). There is no parallel REST tool API.
+- MCP network auth: when `MCP_SHARED_SECRET` is set (on the orchestrator and both MCP servers),
+  every `/mcp` request must carry it in the `x-mcp-secret` header; requests without it get 401.
+  On Cloud Foundry, additionally bind the MCP servers to internal routes (`apps.internal`) so
+  they are not publicly routable at all.
+- Streaming: all four LLM providers implement `completeStream`, so assistant text is pushed
+  token-by-token over `chat:token`. Non-streaming fallbacks emit the full text as one chunk.
+- Tool turns (assistant tool calls + tool results) are persisted in `conversation_messages`,
+  so follow-up questions can reference earlier tool data. Histories are sanitized on load so
+  dangling tool-call turns (e.g. writes that went to the confirm flow) never break providers.
+- Auth: in `AUTH_MODE=xsuaa` the orchestrator validates JWT signatures with `@sap/xssec` against
+  the bound XSUAA instance (`VCAP_SERVICES` on CF, or `XSUAA_*` env vars). Admin is derived from
+  the `$XSAPPNAME.Admin` scope. `AUTH_MODE=mock` verifies HMAC tokens signed with
+  `MOCK_JWT_SECRET` and is for local dev only.
+- Warehouse scopes carry an access level: `read` scopes allow read tools only; write tools
+  (`moveStock`) require a `write` scope on that warehouse (admins bypass both checks).
+
 ## Build Order Implemented
 
 1. Root workspace + shared package

@@ -1,4 +1,6 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 
 export interface ToolDescriptor {
   name: string;
@@ -21,27 +23,18 @@ export class McpService implements OnModuleInit {
   async onModuleInit() {
     for (const [name, baseUrl] of Object.entries(this.servers)) {
       try {
-        await fetch(`${baseUrl}/health`);
-        const listedResponse = await fetch(`${baseUrl}/tools/list`);
-        if (!listedResponse.ok) {
-          throw new Error(`tools/list failed with ${listedResponse.status}`);
-        }
-
-        const listed = (await listedResponse.json()) as {
-          tools?: Array<{ name: string; description?: string; inputSchema?: Record<string, unknown> }>;
-        };
-
-        const toolList = listed.tools || [];
-
-        for (const tool of toolList) {
-          this.tools.set(tool.name, {
-            name: tool.name,
-            description: tool.description || '',
-            inputSchema: tool.inputSchema || {},
-            serverName: name,
-          });
-        }
-        this.logger.log(`Registered ${toolList.length} tools from ${name}`);
+        await this.withClient(name, async (client) => {
+          const listed = await client.listTools();
+          for (const tool of listed.tools) {
+            this.tools.set(tool.name, {
+              name: tool.name,
+              description: tool.description || '',
+              inputSchema: (tool.inputSchema as Record<string, unknown>) || {},
+              serverName: name,
+            });
+          }
+          this.logger.log(`Registered ${listed.tools.length} tools from ${name} (${baseUrl})`);
+        });
       } catch (error) {
         const message = error instanceof Error ? error.message : 'unknown error';
         this.logger.error(`Failed to register tools from ${name}: ${message}`);
@@ -63,25 +56,37 @@ export class McpService implements OnModuleInit {
       throw new Error(`Unknown tool: ${name}`);
     }
 
-    const baseUrl = this.servers[tool.serverName];
-    const response = await fetch(`${baseUrl}/tools/call`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-      name,
-      arguments: args,
-      }),
+    return this.withClient(tool.serverName, async (client) => {
+      const result = await client.callTool({ name, arguments: args });
+      if (result.isError) {
+        const text = Array.isArray(result.content)
+          ? result.content
+              .filter((c): c is { type: 'text'; text: string } => (c as { type: string }).type === 'text')
+              .map((c) => c.text)
+              .join('\n')
+          : '';
+        throw new Error(text || `Tool ${name} failed`);
+      }
+      return result as Record<string, unknown>;
     });
+  }
 
-    if (!response.ok) {
-      const body = (await response.json().catch(() => ({}))) as { error?: { message?: string } };
-      throw new Error(body.error?.message || `tools/call failed with ${response.status}`);
+  private async withClient<T>(serverName: string, fn: (client: Client) => Promise<T>): Promise<T> {
+    const baseUrl = this.servers[serverName];
+    if (!baseUrl) {
+      throw new Error(`Unknown MCP server: ${serverName}`);
     }
 
-    const result = (await response.json()) as Record<string, unknown>;
-
-    return result;
+    const client = new Client({ name: 'orchestrator', version: '1.0.0' });
+    const secret = process.env.MCP_SHARED_SECRET;
+    const transport = new StreamableHTTPClientTransport(new URL(`${baseUrl.replace(/\/$/, '')}/mcp`), {
+      requestInit: secret ? { headers: { 'x-mcp-secret': secret } } : undefined,
+    });
+    await client.connect(transport);
+    try {
+      return await fn(client);
+    } finally {
+      await client.close().catch(() => undefined);
+    }
   }
 }

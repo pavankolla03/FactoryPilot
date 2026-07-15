@@ -20,8 +20,6 @@ await redis.connect();
 const app = express();
 app.use(express.json());
 
-const mcpServer = new McpServer({ name: 'mcp-warehouse-ops', version: '1.0.0' });
-
 async function handleMoveStock(input: {
   productId: string;
   fromLocation: string;
@@ -58,7 +56,10 @@ async function handleGetRecentMovements(warehouseId: string, sinceHours: number)
   return { source: 'live', records };
 }
 
-mcpServer.registerTool(
+function buildServer(): McpServer {
+  const mcpServer = new McpServer({ name: 'mcp-warehouse-ops', version: '1.0.0' });
+
+  mcpServer.registerTool(
   'moveStock',
   {
     title: 'Move stock between warehouse locations',
@@ -67,7 +68,8 @@ mcpServer.registerTool(
       productId: z.string(),
       fromLocation: z.string(),
       toLocation: z.string(),
-      qty: z.number().int().positive(),
+      // coerce: LLMs frequently pass numerics as strings ("10")
+      qty: z.coerce.number().int().positive(),
       warehouseId: z.string(),
     },
   },
@@ -87,7 +89,7 @@ mcpServer.registerTool(
     description: 'Reads cached movements from Redis sorted set and falls back to iFlow on cold start',
     inputSchema: {
       warehouseId: z.string(),
-      sinceHours: z.number().int().positive(),
+      sinceHours: z.coerce.number().int().positive(),
     },
   },
   async ({ warehouseId, sinceHours }) => {
@@ -100,78 +102,37 @@ mcpServer.registerTool(
   },
 );
 
-const transport = new StreamableHTTPServerTransport({
-  sessionIdGenerator: undefined,
+  return mcpServer;
+}
+
+// When MCP_SHARED_SECRET is set, only callers presenting it may invoke tools.
+app.use('/mcp', (req, res, next) => {
+  const secret = process.env.MCP_SHARED_SECRET;
+  if (secret && req.headers['x-mcp-secret'] !== secret) {
+    res.status(401).json({ error: { code: 'VALIDATION_ERROR', message: 'missing or invalid MCP shared secret' } });
+    return;
+  }
+  next();
 });
 
-await mcpServer.connect(transport);
-
+// Stateless Streamable HTTP: a fresh server + transport per request avoids
+// cross-request session and request-id collisions.
 app.post('/mcp', async (req, res) => {
-  await transport.handleRequest(req, res, req.body);
-});
-
-app.get('/tools/list', (_req, res) => {
-  res.json({
-    tools: [
-      {
-        name: 'moveStock',
-        description: 'Moves product quantity from one location to another in the same warehouse',
-        inputSchema: {
-          type: 'object',
-          properties: {
-            productId: { type: 'string' },
-            fromLocation: { type: 'string' },
-            toLocation: { type: 'string' },
-            qty: { type: 'number' },
-            warehouseId: { type: 'string' },
-          },
-          required: ['productId', 'fromLocation', 'toLocation', 'qty', 'warehouseId'],
-        },
-      },
-      {
-        name: 'getRecentMovements',
-        description: 'Reads cached movements from Redis sorted set and falls back to iFlow on cold start',
-        inputSchema: {
-          type: 'object',
-          properties: {
-            warehouseId: { type: 'string' },
-            sinceHours: { type: 'number' },
-          },
-          required: ['warehouseId', 'sinceHours'],
-        },
-      },
-    ],
+  const mcpServer = buildServer();
+  const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
+  res.on('close', () => {
+    void transport.close();
+    void mcpServer.close();
   });
-});
-
-app.post('/tools/call', async (req, res) => {
-  const name = req.body?.name as string;
-  const args = (req.body?.arguments || {}) as Record<string, unknown>;
 
   try {
-    if (name === 'moveStock') {
-      const result = await handleMoveStock({
-        productId: String(args.productId),
-        fromLocation: String(args.fromLocation),
-        toLocation: String(args.toLocation),
-        qty: Number(args.qty),
-        warehouseId: String(args.warehouseId),
-      });
-      return res.json({ structuredContent: result });
-    }
-
-    if (name === 'getRecentMovements') {
-      const result = await handleGetRecentMovements(String(args.warehouseId), Number(args.sinceHours));
-      return res.json({ structuredContent: result });
-    }
-
-    return res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: `Unknown tool ${name}` } });
+    await mcpServer.connect(transport);
+    await transport.handleRequest(req, res, req.body);
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Tool call failed';
-    if (message.includes('INSUFFICIENT_STOCK')) {
-      return res.status(400).json({ error: { code: 'INSUFFICIENT_STOCK', message } });
+    logger.error({ err: error }, 'MCP request failed');
+    if (!res.headersSent) {
+      res.status(500).json({ error: { code: 'VALIDATION_ERROR', message: 'MCP request failed' } });
     }
-    return res.status(400).json({ error: { code: 'VALIDATION_ERROR', message } });
   }
 });
 

@@ -53,9 +53,16 @@ export class QuotaService {
 
   @Cron('0 2 * * *')
   async resetMonthlyQuotas() {
+    // Catch up multiple elapsed months in one pass (e.g. after downtime or
+    // for users who have not logged in for a while).
     await this.db.query(
       `UPDATE user_quota
-       SET period_start = (period_start + INTERVAL '1 month')::date
+       SET period_start = (period_start
+         + (INTERVAL '1 month' * (
+              12 * EXTRACT(YEAR FROM age(CURRENT_DATE, period_start))
+              + EXTRACT(MONTH FROM age(CURRENT_DATE, period_start))
+           ))
+       )::date
        WHERE period_start <= (CURRENT_DATE - INTERVAL '1 month')::date`,
     );
   }

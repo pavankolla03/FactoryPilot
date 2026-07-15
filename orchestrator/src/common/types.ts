@@ -1,9 +1,14 @@
+export interface WarehouseScope {
+  warehouseId: string;
+  accessLevel: 'read' | 'write';
+}
+
 export interface AuthUser {
   id: string;
   email: string;
   displayName: string;
   role: 'admin' | 'viewer';
-  scopes: string[];
+  scopes: WarehouseScope[];
 }
 
 export interface RequestWithUser {

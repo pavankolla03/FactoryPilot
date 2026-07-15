@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import axios from 'axios';
 import { io, Socket } from 'socket.io-client';
@@ -35,6 +35,9 @@ function App() {
   const [chatTurns, setChatTurns] = useState<ChatTurn[]>([]);
   const [streamingConversationId, setStreamingConversationId] = useState<string | null>(null);
   const [streamingText, setStreamingText] = useState('');
+  // Ref mirror of streamingText so socket handlers read the latest value
+  // without the effect depending on it (which would reconnect per delta).
+  const streamingTextRef = useRef('');
   const [pendingActions, setPendingActions] = useState<PendingAction[]>([]);
   const [usage, setUsage] = useState({ used: 0, limit: 50000, periodStart: '' });
   const [tab, setTab] = useState<'chat' | 'usage' | 'logs' | 'users'>('chat');
@@ -65,15 +68,18 @@ function App() {
 
     socket.on('chat:token', (payload: { conversationId: string; delta: string }) => {
       setStreamingConversationId(payload.conversationId);
-      setStreamingText((prev) => prev + payload.delta);
+      streamingTextRef.current += payload.delta;
+      setStreamingText(streamingTextRef.current);
     });
 
     socket.on('chat:done', (payload: { conversationId: string; source: 'cache' | 'live' }) => {
+      const finalText = streamingTextRef.current;
       setChatTurns((prev) => [
         ...prev,
-        { conversationId: payload.conversationId, text: streamingText, source: payload.source },
+        { conversationId: payload.conversationId, text: finalText, source: payload.source },
       ]);
       setStreamingConversationId(null);
+      streamingTextRef.current = '';
       setStreamingText('');
     });
 
@@ -96,7 +102,7 @@ function App() {
     return () => {
       socket.disconnect();
     };
-  }, [loggedIn, token, streamingText]);
+  }, [loggedIn, token]);
 
   useEffect(() => {
     if (!loggedIn) {

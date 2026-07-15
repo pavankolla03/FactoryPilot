@@ -1,23 +1,8 @@
 import OpenAI from 'openai';
 import { encoding_for_model, get_encoding } from 'tiktoken';
 import type { ILLMProvider, LlmChatMessage, LlmCompletionResult, LlmToolDefinition } from './types';
-
-function toOpenAIMessages(messages: LlmChatMessage[]) {
-  return messages.map((m) => {
-    if (m.role === 'tool') {
-      return {
-        role: 'tool' as const,
-        content: m.content,
-        tool_call_id: m.toolCallId || 'tool-call',
-      };
-    }
-
-    return {
-      role: m.role,
-      content: m.content,
-    };
-  });
-}
+import { toOpenAIMessages } from './openai-messages';
+import { streamOpenAICompletion } from './openai-stream';
 
 function estimateTokens(input: string): number {
   try {
@@ -58,7 +43,10 @@ export class SelfHostedProvider implements ILLMProvider {
     });
   }
 
-  async complete(messages: LlmChatMessage[], tools: LlmToolDefinition[]): Promise<LlmCompletionResult> {
+  async complete(
+    messages: LlmChatMessage[],
+    tools: LlmToolDefinition[],
+  ): Promise<LlmCompletionResult> {
     const response = await this.client.chat.completions.create({
       model: this.model,
       messages: toOpenAIMessages(messages),
@@ -71,6 +59,7 @@ export class SelfHostedProvider implements ILLMProvider {
         },
       })),
       tool_choice: 'auto',
+      temperature: Number(process.env.LLM_TEMPERATURE ?? 0),
     });
 
     const choice = response.choices[0]?.message;
@@ -85,7 +74,8 @@ export class SelfHostedProvider implements ILLMProvider {
       response.usage?.prompt_tokens ||
       estimateTokens(messages.map((m) => `${m.role}:${m.content}`).join('\n'));
     const completionTokens =
-      response.usage?.completion_tokens || estimateTokens(choice?.content || JSON.stringify(toolCalls));
+      response.usage?.completion_tokens ||
+      estimateTokens(choice?.content || JSON.stringify(toolCalls));
 
     return {
       text: choice?.content || undefined,
@@ -95,5 +85,32 @@ export class SelfHostedProvider implements ILLMProvider {
       modelUsed: this.model,
       isEstimated: !response.usage,
     };
+  }
+
+  async completeStream(
+    messages: LlmChatMessage[],
+    tools: LlmToolDefinition[],
+    onTextDelta: (delta: string) => void,
+  ): Promise<LlmCompletionResult> {
+    const result = await streamOpenAICompletion(
+      this.client,
+      this.model,
+      messages,
+      tools,
+      onTextDelta,
+    );
+    if (result.isEstimated) {
+      // Endpoint reported no usage in the stream; estimate with tiktoken.
+      return {
+        ...result,
+        promptTokens:
+          result.promptTokens ||
+          estimateTokens(messages.map((m) => `${m.role}:${m.content}`).join('\n')),
+        completionTokens:
+          result.completionTokens ||
+          estimateTokens(result.text || JSON.stringify(result.toolCalls || [])),
+      };
+    }
+    return result;
   }
 }

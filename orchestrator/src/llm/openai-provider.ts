@@ -1,22 +1,7 @@
 import OpenAI from 'openai';
 import type { ILLMProvider, LlmChatMessage, LlmCompletionResult, LlmToolDefinition } from './types';
-
-function toOpenAIMessages(messages: LlmChatMessage[]) {
-  return messages.map((m) => {
-    if (m.role === 'tool') {
-      return {
-        role: 'tool' as const,
-        content: m.content,
-        tool_call_id: m.toolCallId || 'tool-call',
-      };
-    }
-
-    return {
-      role: m.role,
-      content: m.content,
-    };
-  });
-}
+import { toOpenAIMessages } from './openai-messages';
+import { streamOpenAICompletion } from './openai-stream';
 
 export class OpenAIProvider implements ILLMProvider {
   private readonly client: OpenAI;
@@ -30,7 +15,10 @@ export class OpenAIProvider implements ILLMProvider {
     this.client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
   }
 
-  async complete(messages: LlmChatMessage[], tools: LlmToolDefinition[]): Promise<LlmCompletionResult> {
+  async complete(
+    messages: LlmChatMessage[],
+    tools: LlmToolDefinition[],
+  ): Promise<LlmCompletionResult> {
     const response = await this.client.chat.completions.create({
       model: this.model,
       messages: toOpenAIMessages(messages),
@@ -43,6 +31,7 @@ export class OpenAIProvider implements ILLMProvider {
         },
       })),
       tool_choice: 'auto',
+      temperature: Number(process.env.LLM_TEMPERATURE ?? 0),
     });
 
     const choice = response.choices[0]?.message;
@@ -61,5 +50,13 @@ export class OpenAIProvider implements ILLMProvider {
       modelUsed: this.model,
       isEstimated: false,
     };
+  }
+
+  async completeStream(
+    messages: LlmChatMessage[],
+    tools: LlmToolDefinition[],
+    onTextDelta: (delta: string) => void,
+  ): Promise<LlmCompletionResult> {
+    return streamOpenAICompletion(this.client, this.model, messages, tools, onTextDelta);
   }
 }

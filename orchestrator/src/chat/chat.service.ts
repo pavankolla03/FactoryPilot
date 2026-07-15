@@ -1,8 +1,8 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import type { ChatResponse, PendingAction, SessionLogEntry } from '@manufacturing-agent/shared';
 import { DbService } from '../common/db.service';
-import { actionExpired, quotaExceeded, scopeDenied } from '../common/errors';
+import { actionExpired, quotaExceeded, scopeDenied, throwApiError, validationError } from '../common/errors';
 import type { AuthUser } from '../common/types';
 import { LlmProviderFactory } from '../llm/provider.factory';
 import type { LlmChatMessage } from '../llm/types';
@@ -15,6 +15,7 @@ const WRITE_TOOLS = new Set(['moveStock']);
 
 @Injectable()
 export class ChatService {
+  private readonly logger = new Logger(ChatService.name);
   private readonly cacheTtlSeconds = Number(process.env.CACHE_TTL_SECONDS || 8640000);
 
   constructor(
@@ -54,31 +55,49 @@ export class ChatService {
 
     const tools = this.mcp.listTools();
     const systemPrompt =
-      'You are a SAP manufacturing assistant. Always include warehouseId for warehouse-touching tools. If warehouseId is unknown, ask the user. Never claim a write action has already completed before confirmation.';
+      'You are a SAP manufacturing assistant. Always include warehouseId for warehouse-touching tools. ' +
+      'If warehouseId is unknown, ask the user. Never claim a write action has already completed before confirmation. ' +
+      'Invoke tools ONLY through the function-calling mechanism; never print a JSON tool call as text. ' +
+      'Copy parameter values exactly as the user stated them (e.g. location names like "packing" or "shipping").';
 
     const conversationHistory = await this.getConversationMessages(convId);
-    const llmMessages: LlmChatMessage[] = [
-      { role: 'system', content: systemPrompt },
-      ...conversationHistory.map((m) => ({ role: m.role as 'user' | 'assistant' | 'tool', content: m.content })),
-    ];
+    const llmMessages: LlmChatMessage[] = [{ role: 'system', content: systemPrompt }, ...conversationHistory];
 
     const provider = this.providerFactory.getProvider();
     let source: 'cache' | 'live' = 'live';
     const invokedTools: string[] = [];
     let finalText = '';
+    let totalTokens = 0;
+    let streamedChars = 0;
+
+    const toolDefs = tools.map((t) => ({ name: t.name, description: t.description, inputSchema: t.inputSchema }));
+    const onTextDelta = (delta: string) => {
+      streamedChars += delta.length;
+      this.realtime.emitChatToken(user.id, { conversationId: convId, delta });
+    };
 
     try {
       for (let round = 0; round < 8; round += 1) {
         let completion;
         try {
-          completion = await provider.complete(
-            llmMessages,
-            tools.map((t) => ({ name: t.name, description: t.description, inputSchema: t.inputSchema })),
-          );
-        } catch {
+          completion = provider.completeStream
+            ? await provider.completeStream(llmMessages, toolDefs, onTextDelta)
+            : await provider.complete(llmMessages, toolDefs);
+        } catch (error) {
+          const reason = error instanceof Error ? error.message : 'unknown error';
+          this.logger.warn(`LLM provider call failed, using keyword fallback: ${reason}`);
           return this.handleFallbackWithoutLlm(user, convId, message, start, invokedTools);
         }
 
+        if (!completion.toolCalls?.length) {
+          const salvaged = this.salvageToolCallFromText(completion.text);
+          if (salvaged) {
+            this.logger.warn(`Salvaged tool call ${salvaged.name} from plain-text model output`);
+            completion = { ...completion, toolCalls: [salvaged], text: '' };
+          }
+        }
+
+        totalTokens += completion.promptTokens + completion.completionTokens;
         await this.quota.recordUsage({
           userId: user.id,
           promptTokens: completion.promptTokens,
@@ -91,13 +110,20 @@ export class ChatService {
         this.realtime.emitTokenDelta(user.id, { used: usage.used, limit: usage.limit });
 
         if (completion.toolCalls && completion.toolCalls.length > 0) {
+          llmMessages.push({
+            role: 'assistant',
+            content: completion.text || '',
+            toolCalls: completion.toolCalls,
+          });
+          await this.insertMessage(convId, 'assistant', completion.text || '', completion.toolCalls);
+
           for (const call of completion.toolCalls) {
             invokedTools.push(call.name);
 
             const toolDesc = this.mcp.getTool(call.name);
             const warehouseId = (call.arguments.warehouseId as string | undefined) || undefined;
             if (this.requiresWarehouseScope(toolDesc?.inputSchema)) {
-              this.assertScope(user, warehouseId);
+              this.assertScope(user, warehouseId, WRITE_TOOLS.has(call.name) ? 'write' : 'read');
             }
 
             if (WRITE_TOOLS.has(call.name)) {
@@ -116,7 +142,7 @@ export class ChatService {
               this.realtime.emitPendingAction(user.id, action);
 
               const assistantText = 'I prepared a write action. Please confirm to execute.';
-              await this.insertMessage(convId, 'assistant', assistantText, call);
+              await this.insertMessage(convId, 'assistant', assistantText);
               const msgId = randomUUID();
               this.realtime.emitChatToken(user.id, { conversationId: convId, delta: assistantText });
               this.realtime.emitChatDone(user.id, { conversationId: convId, messageId: msgId, source: 'live' });
@@ -127,7 +153,7 @@ export class ChatService {
                 queryText: message,
                 toolsInvoked: invokedTools,
                 cacheStatus: 'n/a',
-                tokensUsed: completion.promptTokens + completion.completionTokens,
+                tokensUsed: totalTokens,
                 status: 'success',
                 latencyMs: Date.now() - start,
               });
@@ -143,12 +169,14 @@ export class ChatService {
 
             const { data, cacheHit } = await this.readToolWithCache(call.name, call.arguments);
             source = cacheHit ? 'cache' : source;
+            const toolContent = JSON.stringify(data);
             llmMessages.push({
               role: 'tool',
               name: call.name,
               toolCallId: call.id,
-              content: JSON.stringify(data),
+              content: toolContent,
             });
+            await this.insertMessage(convId, 'tool', toolContent, { toolCallId: call.id, name: call.name });
           }
           continue;
         }
@@ -165,7 +193,7 @@ export class ChatService {
         queryText: message,
         toolsInvoked: invokedTools,
         cacheStatus: 'n/a',
-        tokensUsed: 0,
+        tokensUsed: totalTokens,
         status,
         latencyMs: Date.now() - start,
       });
@@ -178,7 +206,10 @@ export class ChatService {
 
     await this.insertMessage(convId, 'assistant', finalText);
     const messageId = randomUUID();
-    this.realtime.emitChatToken(user.id, { conversationId: convId, delta: finalText });
+    if (streamedChars === 0) {
+      // Non-streaming provider: emit the full text as a single chunk.
+      this.realtime.emitChatToken(user.id, { conversationId: convId, delta: finalText });
+    }
     this.realtime.emitChatDone(user.id, { conversationId: convId, messageId, source });
 
     await this.writeSessionLog({
@@ -187,7 +218,7 @@ export class ChatService {
       queryText: message,
       toolsInvoked: invokedTools,
       cacheStatus: source === 'cache' ? 'hit' : invokedTools.length ? 'miss' : 'n/a',
-      tokensUsed: 0,
+      tokensUsed: totalTokens,
       status: 'success',
       latencyMs: Date.now() - start,
     });
@@ -213,9 +244,28 @@ export class ChatService {
 
     const params = payload.action.params;
     const warehouseId = params.warehouseId as string | undefined;
-    this.assertScope(user, warehouseId);
+    this.assertScope(user, warehouseId, 'write');
 
-    const result = await this.mcp.callTool(payload.action.tool, params);
+    let result: Record<string, unknown>;
+    try {
+      result = await this.mcp.callTool(payload.action.tool, params);
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : 'tool call failed';
+      await this.writeSessionLog({
+        userId: user.id,
+        conversationId: null,
+        queryText: `confirm-action:${actionId}`,
+        toolsInvoked: [payload.action.tool],
+        cacheStatus: 'n/a',
+        tokensUsed: 0,
+        status: 'error',
+        latencyMs: 0,
+      });
+      if (reason.includes('INSUFFICIENT_STOCK')) {
+        throwApiError(400, 'INSUFFICIENT_STOCK', reason);
+      }
+      validationError(reason);
+    }
 
     if (payload.action.tool === 'moveStock') {
       const warehouse = String(params.warehouseId || 'global');
@@ -241,7 +291,7 @@ export class ChatService {
     return { success: true, actionId, result };
   }
 
-  private assertScope(user: AuthUser, warehouseId?: string) {
+  private assertScope(user: AuthUser, warehouseId: string | undefined, need: 'read' | 'write' = 'read') {
     if (!warehouseId) {
       scopeDenied('warehouseId is required for this tool');
     }
@@ -250,8 +300,13 @@ export class ChatService {
       return;
     }
 
-    if (!user.scopes.includes(warehouseId)) {
+    const scope = user.scopes.find((s) => s.warehouseId === warehouseId);
+    if (!scope) {
       scopeDenied(`Warehouse ${warehouseId} is not assigned to your user`);
+    }
+
+    if (need === 'write' && scope.accessLevel !== 'write') {
+      scopeDenied(`You have read-only access to warehouse ${warehouseId}`);
     }
   }
 
@@ -289,7 +344,7 @@ export class ChatService {
       }
 
       const [, productId, fromLocation, toLocation, wh, qtyRaw] = match;
-      this.assertScope(user, wh);
+      this.assertScope(user, wh, 'write');
 
       const action: PendingAction = {
         actionId: randomUUID(),
@@ -395,6 +450,37 @@ export class ChatService {
     return { conversationId: convId, messageId: msgId, text: fallbackText, source: 'live' };
   }
 
+  /**
+   * Small self-hosted models sometimes print a tool call as JSON text instead
+   * of using function calling. If the text is exactly that, convert it into a
+   * real tool call so the agent loop still works.
+   */
+  private salvageToolCallFromText(text: string | undefined) {
+    if (!text) {
+      return null;
+    }
+
+    const match = text.match(/\{[\s\S]*\}/);
+    if (!match) {
+      return null;
+    }
+
+    try {
+      const parsed = JSON.parse(match[0]) as Record<string, unknown>;
+      const name = (parsed.name || parsed.tool) as string | undefined;
+      const args = (parsed.arguments || parsed.parameters || parsed.params) as
+        | Record<string, unknown>
+        | undefined;
+      if (name && args && typeof args === 'object' && this.mcp.getTool(name)) {
+        return { id: `salvaged-${randomUUID()}`, name, arguments: args };
+      }
+    } catch {
+      return null;
+    }
+
+    return null;
+  }
+
   private requiresWarehouseScope(inputSchema: Record<string, unknown> | undefined) {
     if (!inputSchema) {
       return false;
@@ -473,21 +559,87 @@ export class ChatService {
     );
   }
 
-  private async getConversationMessages(conversationId: string) {
-    const rows = await this.db.query<{ role: string; content: string }>(
-      `SELECT role, content
+  private async getConversationMessages(conversationId: string): Promise<LlmChatMessage[]> {
+    const rows = await this.db.query<{ role: 'user' | 'assistant' | 'tool'; content: string; tool_calls_json: unknown }>(
+      `SELECT role, content, tool_calls_json
        FROM conversation_messages
        WHERE conversation_id = $1
        ORDER BY created_at ASC`,
       [conversationId],
     );
-    return rows.rows;
+
+    const messages: LlmChatMessage[] = rows.rows.map((row) => {
+      if (row.role === 'assistant' && Array.isArray(row.tool_calls_json)) {
+        return {
+          role: 'assistant' as const,
+          content: row.content,
+          toolCalls: row.tool_calls_json as LlmChatMessage['toolCalls'],
+        };
+      }
+      if (row.role === 'tool') {
+        const meta = (row.tool_calls_json || {}) as { toolCallId?: string; name?: string };
+        return { role: 'tool' as const, content: row.content, toolCallId: meta.toolCallId, name: meta.name };
+      }
+      return { role: row.role, content: row.content };
+    });
+
+    return this.sanitizeHistory(messages);
+  }
+
+  /**
+   * Providers reject assistant tool-call turns whose results never made it into
+   * the transcript (e.g. writes routed to the confirm flow) and tool results
+   * with no preceding tool-call turn. Strip both so replayed history is valid.
+   */
+  private sanitizeHistory(messages: LlmChatMessage[]): LlmChatMessage[] {
+    const result: LlmChatMessage[] = [];
+
+    for (let i = 0; i < messages.length; i += 1) {
+      const msg = messages[i];
+
+      if (msg.role === 'tool') {
+        const prev = result[result.length - 1];
+        const prevHasCall =
+          prev &&
+          ((prev.role === 'assistant' && prev.toolCalls?.some((tc) => tc.id === msg.toolCallId)) ||
+            prev.role === 'tool');
+        if (prevHasCall) {
+          result.push(msg);
+        }
+        continue;
+      }
+
+      if (msg.role === 'assistant' && msg.toolCalls?.length) {
+        const followingToolIds = new Set<string>();
+        for (let j = i + 1; j < messages.length && messages[j].role === 'tool'; j += 1) {
+          const id = messages[j].toolCallId;
+          if (id) {
+            followingToolIds.add(id);
+          }
+        }
+        const complete = msg.toolCalls.every((tc) => followingToolIds.has(tc.id));
+        if (complete) {
+          result.push(msg);
+        } else {
+          result.push({ role: 'assistant', content: msg.content || '(proposed a tool action)' });
+        }
+        continue;
+      }
+
+      result.push(msg);
+    }
+
+    return result;
   }
 
   private async invalidateWarehouseCache(warehouseId: string) {
-    const keys = await this.redis.raw.keys(`cache:*:${warehouseId}:*`);
-    if (keys.length > 0) {
-      await this.redis.raw.del(keys);
+    // SCAN instead of KEYS so a large cache can't block Redis.
+    const toDelete: string[] = [];
+    for await (const key of this.redis.raw.scanIterator({ MATCH: `cache:*:${warehouseId}:*`, COUNT: 200 })) {
+      toDelete.push(key);
+    }
+    if (toDelete.length > 0) {
+      await this.redis.raw.del(toDelete);
     }
   }
 

@@ -1,10 +1,59 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import jwt from 'jsonwebtoken';
 import { DbService } from '../common/db.service';
-import type { AuthUser } from '../common/types';
+import type { AuthUser, WarehouseScope } from '../common/types';
+
+// @sap/xssec v4 ships no TypeScript types; keep the surface we use narrow.
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const xssec = require('@sap/xssec') as {
+  XsuaaService: new (credentials: Record<string, unknown>) => unknown;
+  createSecurityContext: (
+    service: unknown,
+    config: { jwt: string },
+  ) => Promise<{
+    getEmail(): string | undefined;
+    getGivenName(): string | undefined;
+    getFamilyName(): string | undefined;
+    getLogonName(): string | undefined;
+    checkLocalScope(scope: string): boolean;
+  }>;
+};
+
+function loadXsuaaCredentials(): Record<string, unknown> | null {
+  if (process.env.VCAP_SERVICES) {
+    try {
+      const vcap = JSON.parse(process.env.VCAP_SERVICES) as Record<
+        string,
+        Array<{ credentials?: Record<string, unknown> }>
+      >;
+      const credentials = vcap.xsuaa?.[0]?.credentials;
+      if (credentials) {
+        return credentials;
+      }
+    } catch {
+      // fall through to XSUAA_* vars
+    }
+  }
+
+  if (process.env.XSUAA_CLIENTID && process.env.XSUAA_URL) {
+    return {
+      clientid: process.env.XSUAA_CLIENTID,
+      clientsecret: process.env.XSUAA_CLIENTSECRET,
+      url: process.env.XSUAA_URL,
+      uaadomain: process.env.XSUAA_UAADOMAIN,
+      xsappname: process.env.XSUAA_XSAPPNAME || 'manufacturing-agent',
+      verificationkey: process.env.XSUAA_VERIFICATION_KEY,
+    };
+  }
+
+  return null;
+}
 
 @Injectable()
 export class AuthService {
+  private readonly logger = new Logger(AuthService.name);
+  private xsuaaService: unknown | null = null;
+
   constructor(private readonly db: DbService) {}
 
   async validateBearerToken(authHeader?: string): Promise<AuthUser | null> {
@@ -35,32 +84,38 @@ export class AuthService {
       };
     }
 
-    // In xsuaa mode, expect JWT forwarded by approuter. Use @sap/xssec in production setup.
-    const decoded = jwt.decode(token) as
-      | {
-          email?: string;
-          user_name?: string;
-          given_name?: string;
-          family_name?: string;
-          scope?: string[];
-          sub?: string;
-          xs_rolecollections?: string[];
-        }
-      | null;
+    // In xsuaa mode the JWT signature MUST be verified against the bound XSUAA service.
+    if (!this.xsuaaService) {
+      const credentials = loadXsuaaCredentials();
+      if (!credentials) {
+        this.logger.error('AUTH_MODE=xsuaa but no XSUAA binding found (VCAP_SERVICES or XSUAA_* env vars)');
+        return null;
+      }
+      this.xsuaaService = new xssec.XsuaaService(credentials);
+    }
 
-    if (!decoded?.email) {
+    let context;
+    try {
+      context = await xssec.createSecurityContext(this.xsuaaService, { jwt: token });
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : 'unknown error';
+      this.logger.warn(`XSUAA token validation failed: ${reason}`);
       return null;
     }
 
-    const isAdmin =
-      decoded.xs_rolecollections?.some((r) => r.toLowerCase().includes('admin')) ||
-      decoded.scope?.some((s) => s.toLowerCase().includes('admin'));
+    const email = context.getEmail();
+    if (!email) {
+      return null;
+    }
 
+    const isAdmin = context.checkLocalScope('Admin');
     const displayName =
-      decoded.user_name || `${decoded.given_name || ''} ${decoded.family_name || ''}`.trim() || decoded.email;
+      context.getLogonName() ||
+      `${context.getGivenName() || ''} ${context.getFamilyName() || ''}`.trim() ||
+      email;
     const role: 'admin' | 'viewer' = isAdmin ? 'admin' : 'viewer';
 
-    const user = await this.ensureUser(decoded.email, displayName, role);
+    const user = await this.ensureUser(email, displayName, role);
     const scopes = await this.getScopes(user.id);
 
     return {
@@ -120,11 +175,11 @@ export class AuthService {
     return inserted.rows[0];
   }
 
-  private async getScopes(userId: string): Promise<string[]> {
-    const rows = await this.db.query<{ warehouse_id: string }>(
-      'SELECT warehouse_id FROM user_scopes WHERE user_id = $1',
+  private async getScopes(userId: string): Promise<WarehouseScope[]> {
+    const rows = await this.db.query<{ warehouse_id: string; access_level: 'read' | 'write' }>(
+      'SELECT warehouse_id, access_level FROM user_scopes WHERE user_id = $1',
       [userId],
     );
-    return rows.rows.map((r) => r.warehouse_id);
+    return rows.rows.map((r) => ({ warehouseId: r.warehouse_id, accessLevel: r.access_level }));
   }
 }
