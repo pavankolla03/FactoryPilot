@@ -31,7 +31,24 @@ export class AdminController {
 
   @Get()
   async listUsers() {
-    const users = await this.db.query('SELECT id, email, display_name, role, created_at FROM users ORDER BY created_at DESC');
+    const users = await this.db.query(
+      `SELECT u.id,
+              u.email,
+              u.display_name,
+              u.role,
+              u.created_at,
+              COALESCE(q.monthly_token_limit, 50000) AS monthly_token_limit,
+              COALESCE(s.scopes, '[]'::json) AS scopes
+       FROM users u
+       LEFT JOIN user_quota q ON q.user_id = u.id
+       LEFT JOIN (
+         SELECT user_id,
+                json_agg(json_build_object('warehouse_id', warehouse_id, 'access_level', access_level)) AS scopes
+         FROM user_scopes
+         GROUP BY user_id
+       ) s ON s.user_id = u.id
+       ORDER BY u.created_at DESC`,
+    );
     return users.rows;
   }
 
