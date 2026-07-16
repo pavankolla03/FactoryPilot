@@ -1,6 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common';
 import jwt from 'jsonwebtoken';
+import bcrypt from 'bcryptjs';
 import { DbService } from '../common/db.service';
+import { throwApiError } from '../common/errors';
 import type { AuthUser, WarehouseScope } from '../common/types';
 
 // @sap/xssec v4 ships no TypeScript types; keep the surface we use narrow.
@@ -64,6 +66,35 @@ export class AuthService {
     const token = authHeader.slice('Bearer '.length);
     const mode = process.env.AUTH_MODE || 'xsuaa';
 
+    if (mode === 'local') {
+      let decoded: { sub: string };
+      try {
+        decoded = jwt.verify(token, this.jwtSecret()) as { sub: string };
+      } catch {
+        return null;
+      }
+
+      const row = await this.db.query<{
+        id: string;
+        email: string;
+        display_name: string;
+        role: 'admin' | 'viewer';
+      }>('SELECT id, email, display_name, role FROM users WHERE id = $1', [decoded.sub]);
+      const user = row.rows[0];
+      if (!user) {
+        return null;
+      }
+
+      const scopes = await this.getScopes(user.id);
+      return {
+        id: user.id,
+        email: user.email,
+        displayName: user.display_name,
+        role: user.role,
+        scopes,
+      };
+    }
+
     if (mode === 'mock') {
       const secret = process.env.MOCK_JWT_SECRET || 'dev-secret';
       const decoded = jwt.verify(token, secret) as {
@@ -124,6 +155,82 @@ export class AuthService {
       displayName: user.display_name,
       role: user.role,
       scopes,
+    };
+  }
+
+  private jwtSecret() {
+    return process.env.AUTH_JWT_SECRET || process.env.MOCK_JWT_SECRET || 'dev-secret';
+  }
+
+  private issueToken(user: { id: string; email: string; role: 'admin' | 'viewer' }) {
+    return jwt.sign({ sub: user.id, email: user.email, role: user.role }, this.jwtSecret(), {
+      expiresIn: '12h',
+    });
+  }
+
+  async signup(email: string, displayName: string, password: string) {
+    const existing = await this.db.query<{ id: string; password_hash: string | null }>(
+      'SELECT id, password_hash FROM users WHERE email = $1',
+      [email],
+    );
+    if (existing.rows[0]?.password_hash) {
+      throwApiError(409, 'VALIDATION_ERROR', 'An account with this email already exists — sign in instead.');
+    }
+
+    // The first credentialed account becomes the administrator; everyone after
+    // signs up as an operator and gets warehouse access granted by an admin.
+    const admins = await this.db.query<{ count: string }>(
+      "SELECT COUNT(*)::int AS count FROM users WHERE password_hash IS NOT NULL AND role = 'admin'",
+    );
+    const role: 'admin' | 'viewer' = Number(admins.rows[0]?.count || 0) === 0 ? 'admin' : 'viewer';
+
+    const passwordHash = await bcrypt.hash(password, 10);
+
+    let user: { id: string; email: string; display_name: string; role: 'admin' | 'viewer' };
+    if (existing.rows[0]) {
+      const updated = await this.db.query<typeof user>(
+        `UPDATE users SET display_name = $1, role = $2, password_hash = $3
+         WHERE id = $4
+         RETURNING id, email, display_name, role`,
+        [displayName, role, passwordHash, existing.rows[0].id],
+      );
+      user = updated.rows[0];
+    } else {
+      const inserted = await this.db.query<typeof user>(
+        `INSERT INTO users(email, display_name, role, password_hash)
+         VALUES($1, $2, $3, $4)
+         RETURNING id, email, display_name, role`,
+        [email, displayName, role, passwordHash],
+      );
+      user = inserted.rows[0];
+    }
+
+    await this.db.query(
+      'INSERT INTO user_quota(user_id, monthly_token_limit, period_start) VALUES($1, $2, CURRENT_DATE) ON CONFLICT (user_id) DO NOTHING',
+      [user.id, 50000],
+    );
+
+    return { token: this.issueToken(user), user };
+  }
+
+  async login(email: string, password: string) {
+    const row = await this.db.query<{
+      id: string;
+      email: string;
+      display_name: string;
+      role: 'admin' | 'viewer';
+      password_hash: string | null;
+    }>('SELECT id, email, display_name, role, password_hash FROM users WHERE email = $1', [email]);
+
+    const user = row.rows[0];
+    const valid = user?.password_hash && (await bcrypt.compare(password, user.password_hash));
+    if (!valid) {
+      throwApiError(401, 'VALIDATION_ERROR', 'Invalid email or password.');
+    }
+
+    return {
+      token: this.issueToken(user),
+      user: { id: user.id, email: user.email, display_name: user.display_name, role: user.role },
     };
   }
 

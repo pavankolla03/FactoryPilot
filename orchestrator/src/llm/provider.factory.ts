@@ -3,6 +3,7 @@ import { AnthropicProvider } from './anthropic-provider';
 import type { ILLMProvider } from './types';
 import { AzureOpenAIProvider } from './azure-openai-provider';
 import { OpenAIProvider } from './openai-provider';
+import { OpenRouterProvider } from './openrouter-provider';
 import { SelfHostedProvider } from './self-hosted-provider';
 
 @Injectable()
@@ -25,6 +26,9 @@ export class LlmProviderFactory {
         break;
       case 'anthropic':
         this.provider = new AnthropicProvider();
+        break;
+      case 'openrouter':
+        this.provider = new OpenRouterProvider();
         break;
       case 'self-hosted':
       default:

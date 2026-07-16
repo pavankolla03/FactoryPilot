@@ -17,6 +17,7 @@ export function Sidebar({
   onTab,
   lang,
   onLang,
+  onLogout,
 }: {
   tab: Tab;
   role: 'admin' | 'viewer';
@@ -24,6 +25,7 @@ export function Sidebar({
   onTab: (t: Tab) => void;
   lang: Lang;
   onLang: (l: Lang) => void;
+  onLogout: () => void;
 }) {
   const { t } = useI18n();
 
@@ -69,12 +71,19 @@ export function Sidebar({
       <div className="rounded-2xl bg-white/[0.04] p-3">
         <div className="flex items-center gap-3">
           <div className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-fp-accent text-xs font-bold text-white">
-            {initialsOf(displayName)}
+            {initialsOf(displayName || '?')}
           </div>
-          <div className="min-w-0">
+          <div className="min-w-0 flex-1">
             <div className="truncate text-[13px] font-semibold text-white">{displayName}</div>
             <div className="text-[11px] text-[#93A3BB]">{role === 'admin' ? t('role.admin') : t('role.viewer')}</div>
           </div>
+          <button
+            className="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-[#93A3BB] transition hover:bg-white/10 hover:text-white"
+            title="Log out"
+            onClick={onLogout}
+          >
+            <Icon path={paths.logout} size={15} strokeWidth={2} />
+          </button>
         </div>
       </div>
     </aside>

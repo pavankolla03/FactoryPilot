@@ -2,7 +2,8 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import axios from 'axios';
 import { io, Socket } from 'socket.io-client';
 import type { PendingAction, SessionLogEntry } from '@manufacturing-agent/shared';
-import { Login } from './components/Login';
+import { Landing } from './components/Landing';
+import { AuthPage } from './components/AuthPages';
 import { Sidebar, type Tab } from './components/Sidebar';
 import { ChatPage, type ChatTurn, type ConversationSummary, type StockAlert } from './components/ChatPage';
 import { AnalyticsPage } from './components/AnalyticsPage';
@@ -24,13 +25,30 @@ export type AppNotification = {
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
 const WS_URL = import.meta.env.VITE_WS_URL || API_BASE_URL || window.location.origin;
 
+type StoredSession = {
+  token: string;
+  displayName: string;
+  role: UserRole;
+  email: string;
+};
+
+function loadSession(): StoredSession | null {
+  try {
+    const raw = localStorage.getItem('fp-session');
+    return raw ? (JSON.parse(raw) as StoredSession) : null;
+  } catch {
+    return null;
+  }
+}
+
 function App() {
   const { t, lang, setLang } = useI18n();
-  const [token, setToken] = useState<string>('');
-  const [email, setEmail] = useState('admin@factory.local');
-  const [displayName, setDisplayName] = useState('Factory Admin');
-  const [role, setRole] = useState<UserRole>('admin');
-  const [loggedIn, setLoggedIn] = useState(false);
+  const [session, setSession] = useState<StoredSession | null>(loadSession);
+  const [view, setView] = useState<'landing' | 'signin' | 'signup'>('landing');
+  const token = session?.token || '';
+  const displayName = session?.displayName || '';
+  const role: UserRole = session?.role || 'viewer';
+  const loggedIn = Boolean(session);
   const [chatInput, setChatInput] = useState('');
   const [chatTurns, setChatTurns] = useState<ChatTurn[]>([]);
   const [streaming, setStreaming] = useState(false);
@@ -56,8 +74,58 @@ function App() {
       }
       return config;
     });
+    instance.interceptors.response.use(
+      (res) => res,
+      (error) => {
+        // Expired/invalid session: drop it and return to the landing page.
+        if (axios.isAxiosError(error) && error.response?.status === 401 && !String(error.config?.url).includes('/auth/')) {
+          logout();
+        }
+        return Promise.reject(error);
+      },
+    );
     return instance;
   }, [token]);
+
+  function persistSession(next: StoredSession) {
+    localStorage.setItem('fp-session', JSON.stringify(next));
+    setSession(next);
+  }
+
+  function logout() {
+    localStorage.removeItem('fp-session');
+    setSession(null);
+    setView('landing');
+    setChatTurns([]);
+    setPendingActions([]);
+    setActiveConversationId(null);
+    setTab('chat');
+  }
+
+  async function authenticate(mode: 'signin' | 'signup', fields: { email: string; password: string; displayName?: string }) {
+    try {
+      const res =
+        mode === 'signup'
+          ? await client.post('/api/auth/signup', {
+              email: fields.email,
+              displayName: fields.displayName,
+              password: fields.password,
+            })
+          : await client.post('/api/auth/login', { email: fields.email, password: fields.password });
+
+      persistSession({
+        token: res.data.token,
+        displayName: res.data.user.display_name,
+        role: res.data.user.role,
+        email: res.data.user.email,
+      });
+    } catch (error) {
+      if (axios.isAxiosError(error)) {
+        throw new Error(error.response?.data?.error?.message || error.response?.data?.message || error.message);
+      }
+      throw error;
+    }
+  }
 
   useEffect(() => {
     if (!loggedIn) {
@@ -128,16 +196,6 @@ function App() {
       void refreshUsers();
     }
   }, [loggedIn]);
-
-  async function mockLogin() {
-    const res = await client.post('/api/auth/mock-login', {
-      email,
-      displayName,
-      role,
-    });
-    setToken(res.data.token);
-    setLoggedIn(true);
-  }
 
   async function sendChat(message?: string) {
     const text = (message ?? chatInput).trim();
@@ -255,17 +313,17 @@ function App() {
   }
 
   if (!loggedIn) {
-    return (
-      <Login
-        email={email}
-        displayName={displayName}
-        role={role}
-        onEmail={setEmail}
-        onDisplayName={setDisplayName}
-        onRole={setRole}
-        onSubmit={() => void mockLogin()}
-      />
-    );
+    if (view === 'signin' || view === 'signup') {
+      return (
+        <AuthPage
+          mode={view}
+          onSubmit={(fields) => authenticate(view, fields)}
+          onSwitch={() => setView(view === 'signin' ? 'signup' : 'signin')}
+          onBack={() => setView('landing')}
+        />
+      );
+    }
+    return <Landing onSignIn={() => setView('signin')} onSignUp={() => setView('signup')} />;
   }
 
   const pageMeta: Record<Tab, { title: string; subtitle: string }> = {
@@ -280,7 +338,15 @@ function App() {
 
   return (
     <div className="flex min-h-screen flex-col bg-fp-bg md:flex-row">
-      <Sidebar tab={tab} role={role} displayName={displayName} onTab={setTab} lang={lang} onLang={setLang} />
+      <Sidebar
+        tab={tab}
+        role={role}
+        displayName={displayName}
+        onTab={setTab}
+        lang={lang}
+        onLang={setLang}
+        onLogout={logout}
+      />
 
       <main className="min-w-0 flex-1 p-6 md:p-8">
         <PageHeader

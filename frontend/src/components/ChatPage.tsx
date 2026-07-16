@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import type { PendingAction } from '@manufacturing-agent/shared';
 import { EmptyState, Icon, LogoMark, SourceChip, initialsOf, paths } from './ui';
 import { useI18n } from '../i18n';
@@ -435,8 +437,8 @@ function AssistantBody({ text }: { text: string }) {
   }
 
   return (
-    <div className="whitespace-pre-wrap rounded-2xl rounded-tl-md border border-fp-line bg-fp-bg px-4 py-3 text-sm leading-relaxed text-fp-ink">
-      {text}
+    <div className="md-body rounded-2xl rounded-tl-md border border-fp-line bg-fp-bg px-4 py-3 text-sm leading-relaxed text-fp-ink">
+      <ReactMarkdown remarkPlugins={[remarkGfm]}>{text}</ReactMarkdown>
     </div>
   );
 }

@@ -51,6 +51,52 @@ body {
   box-shadow: inset 2px 0 0 0 #2a78d6;
 }
 
+/* Markdown rendered inside assistant chat bubbles */
+.md-body p + p,
+.md-body p + ul,
+.md-body ul + p,
+.md-body p + table,
+.md-body table + p {
+  margin-top: 0.6em;
+}
+
+.md-body ul {
+  list-style: disc;
+  padding-left: 1.2em;
+}
+
+.md-body ol {
+  list-style: decimal;
+  padding-left: 1.2em;
+}
+
+.md-body strong {
+  font-weight: 600;
+  color: #0f1b2d;
+}
+
+.md-body code {
+  @apply rounded bg-fp-line/60 px-1 py-0.5 text-[12px];
+}
+
+.md-body table {
+  @apply my-2 w-full overflow-hidden rounded-xl border border-fp-line text-xs;
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+.md-body th {
+  @apply border-b border-fp-line bg-fp-surface px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-wider text-fp-ink-3;
+}
+
+.md-body td {
+  @apply border-b border-fp-line bg-fp-surface px-3 py-2 font-medium;
+}
+
+.md-body tr:last-child td {
+  border-bottom: none;
+}
+
 @keyframes fp-blink {
   0%,
   100% {

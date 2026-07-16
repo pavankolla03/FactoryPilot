@@ -30,6 +30,7 @@ export const paths = {
   globe: 'M12 3a9 9 0 100 18 9 9 0 000-18zm-9 9h18M12 3c2.5 2.4 4 5.6 4 9s-1.5 6.6-4 9c-2.5-2.4-4-5.6-4-9s1.5-6.6 4-9z',
   download: 'M12 4v11m0 0l-4-4m4 4l4-4M5 20h14',
   history: 'M4 6v5h5M4.5 11A8 8 0 1112 20a8 8 0 01-7.5-9zM12 8v4l3 2',
+  logout: 'M15 12H4m0 0l3.5-3.5M4 12l3.5 3.5M10 4h8a2 2 0 012 2v12a2 2 0 01-2 2h-8',
 };
 
 export function LogoMark({ size = 34 }: { size?: number }) {
