@@ -97,6 +97,64 @@ body {
   border-bottom: none;
 }
 
+/* FactoryPilot mark breathing while the model generates */
+@keyframes fp-logo-breathe {
+  0%,
+  100% {
+    transform: scale(1);
+    filter: drop-shadow(0 0 0 rgba(42, 120, 214, 0));
+  }
+  50% {
+    transform: scale(1.12);
+    filter: drop-shadow(0 0 10px rgba(42, 120, 214, 0.55));
+  }
+}
+
+.logo-thinking {
+  animation: fp-logo-breathe 1.4s ease-in-out infinite;
+  transform-origin: center;
+}
+
+/* Claude-desktop-inspired chat canvas */
+.chat-canvas {
+  background: #faf9f5;
+}
+
+.chat-user-block {
+  background: #eeede4;
+  color: #1f1e1d;
+}
+
+.chat-serif {
+  font-family: Georgia, 'Iowan Old Style', 'Times New Roman', serif;
+  font-size: 15px;
+  line-height: 1.65;
+  color: #262521;
+}
+
+.chat-input-claude {
+  background: #ffffff;
+  border: 1px solid #e3e1d5;
+  box-shadow: 0 4px 16px rgba(31, 30, 29, 0.06);
+}
+
+.chat-input-claude:focus-within {
+  border-color: #c9c6b4;
+  box-shadow: 0 4px 20px rgba(31, 30, 29, 0.1);
+}
+
+.chat-suggestion {
+  @apply rounded-full border px-3.5 py-2 text-xs font-medium transition;
+  border-color: #e3e1d5;
+  background: #ffffff;
+  color: #56544d;
+}
+
+.chat-suggestion:hover {
+  border-color: #2a78d6;
+  color: #2a78d6;
+}
+
 @keyframes fp-blink {
   0%,
   100% {

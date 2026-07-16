@@ -116,85 +116,88 @@ export function ChatPage({
         </div>
       </div>
 
-      <div className="card flex h-[calc(100vh-190px)] min-h-[520px] flex-col">
-        <div ref={scrollRef} className="flex-1 space-y-5 overflow-auto p-6">
-          {chatTurns.length === 0 && !streaming && (
-            <div className="flex h-full flex-col items-center justify-center">
-              <LogoMark size={44} />
-              <h3 className="mt-4 text-lg font-semibold tracking-tight text-fp-ink">{t('chat.empty.title')}</h3>
-              <p className="mt-1 max-w-sm text-center text-sm text-fp-ink-3">{t('chat.empty.subtitle')}</p>
-              <div className="mt-6 flex max-w-xl flex-wrap justify-center gap-2">
-                {SUGGESTIONS.map((s) => (
-                  <button
-                    key={s}
-                    className="rounded-full border border-fp-line bg-fp-surface px-3.5 py-2 text-xs font-medium text-fp-ink-2 transition hover:border-fp-accent hover:text-fp-accent"
-                    onClick={() => onSuggestion(s)}
-                  >
-                    {s}
-                  </button>
-                ))}
+      <div className="chat-canvas flex h-[calc(100vh-190px)] min-h-[520px] flex-col overflow-hidden rounded-2xl border border-[#E8E6DA]">
+        <div ref={scrollRef} className="flex-1 overflow-auto px-4 py-6">
+          <div className="mx-auto w-full max-w-[720px] space-y-6">
+            {chatTurns.length === 0 && !streaming && (
+              <div className="flex min-h-[420px] flex-col items-center justify-center">
+                <LogoMark size={48} />
+                <h3 className="chat-serif mt-5 text-[22px] font-semibold tracking-tight text-[#1F1E1D]">
+                  {t('chat.empty.title')}
+                </h3>
+                <p className="mt-1.5 max-w-sm text-center text-sm text-[#8A877C]">{t('chat.empty.subtitle')}</p>
+                <div className="mt-7 flex max-w-xl flex-wrap justify-center gap-2">
+                  {SUGGESTIONS.map((s) => (
+                    <button key={s} className="chat-suggestion" onClick={() => onSuggestion(s)}>
+                      {s}
+                    </button>
+                  ))}
+                </div>
               </div>
-            </div>
-          )}
+            )}
 
-          {chatTurns.map((turn, idx) =>
-            turn.role === 'user' ? (
-              <div key={idx} className="flex justify-end gap-3">
-                <div className="max-w-[75%] rounded-2xl rounded-br-md bg-fp-navy px-4 py-3 text-sm leading-relaxed text-white">
-                  {turn.text}
+            {chatTurns.map((turn, idx) =>
+              turn.role === 'user' ? (
+                <div key={idx} className="flex justify-end">
+                  <div className="chat-user-block max-w-[85%] rounded-2xl px-4 py-3 text-[15px] leading-relaxed">
+                    {turn.text}
+                  </div>
                 </div>
-                <div className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-fp-accent text-[10px] font-bold text-white">
-                  {initialsOf(displayName)}
+              ) : (
+                <div key={idx} className="flex gap-3.5">
+                  <div className="shrink-0 pt-1">
+                    <LogoMark size={28} />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <AssistantBody text={turn.text} />
+                    {turn.source && (
+                      <div className="mt-2.5">
+                        <SourceChip source={turn.source} />
+                      </div>
+                    )}
+                  </div>
                 </div>
-              </div>
-            ) : (
-              <div key={idx} className="flex gap-3">
-                <div className="shrink-0 pt-0.5">
-                  <LogoMark size={30} />
-                </div>
-                <div className="max-w-[82%]">
-                  <AssistantBody text={turn.text} />
-                  {turn.source && (
-                    <div className="mt-2">
-                      <SourceChip source={turn.source} />
-                    </div>
-                  )}
-                </div>
-              </div>
-            ),
-          )}
+              ),
+            )}
 
-          {streaming && (
-            <div className="flex gap-3">
-              <div className="shrink-0 pt-0.5">
-                <LogoMark size={30} />
-              </div>
-              <div className="max-w-[82%]">
-                <div className="rounded-2xl rounded-tl-md border border-fp-line bg-fp-bg px-4 py-3 text-sm leading-relaxed text-fp-ink">
-                  {streamingText || t('chat.working')}
-                  <span className="stream-cursor" />
+            {streaming && (
+              <div className="flex gap-3.5">
+                <div className="shrink-0 pt-1">
+                  <LogoMark size={28} animate />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="chat-serif whitespace-pre-wrap">
+                    {streamingText || t('chat.working')}
+                    <span className="stream-cursor" />
+                  </div>
                 </div>
               </div>
-            </div>
-          )}
+            )}
+          </div>
         </div>
 
-        <div className="border-t border-fp-line p-4">
-          <div className="flex items-center gap-2.5">
-            <input
-              className="input py-3"
-              value={chatInput}
-              onChange={(e) => onInput(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && onSend()}
-              placeholder={t('chat.placeholder')}
-            />
-            <MicButton onTranscript={onInput} />
-            <button className="btn-primary px-5 py-3" onClick={onSend} disabled={!chatInput.trim()}>
-              <Icon path={paths.send} size={16} strokeWidth={2.2} />
-              {t('chat.send')}
-            </button>
+        <div className="px-4 pb-4 pt-1">
+          <div className="mx-auto w-full max-w-[720px]">
+            <div className="chat-input-claude flex items-center gap-1.5 rounded-3xl p-2 pl-4 transition">
+              <input
+                className="min-w-0 flex-1 bg-transparent py-2 text-[15px] text-[#1F1E1D] outline-none placeholder:text-[#A5A294]"
+                value={chatInput}
+                onChange={(e) => onInput(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && onSend()}
+                placeholder={t('chat.placeholder')}
+              />
+              <MicButton onTranscript={onInput} />
+              <button
+                className="grid h-10 w-10 shrink-0 place-items-center rounded-2xl bg-fp-accent text-white transition hover:bg-fp-accent-dark disabled:opacity-40"
+                onClick={onSend}
+                disabled={!chatInput.trim()}
+                title={t('chat.send')}
+              >
+                <Icon path={paths.send} size={16} strokeWidth={2.2} />
+              </button>
+            </div>
+            <div className="mt-2 text-center text-[11px] text-[#A5A294]">{t('chat.footnote')}</div>
           </div>
-          <div className="mt-2 px-1 text-[11px] text-fp-ink-3">{t('chat.footnote')}</div>
         </div>
       </div>
 
@@ -356,10 +359,8 @@ function MicButton({ onTranscript }: { onTranscript: (text: string) => void }) {
 
   return (
     <button
-      className={`grid h-11 w-11 shrink-0 place-items-center rounded-xl border transition ${
-        listening
-          ? 'border-fp-bad bg-fp-bad-soft text-fp-bad'
-          : 'border-fp-line bg-fp-surface text-fp-ink-2 hover:border-fp-accent hover:text-fp-accent'
+      className={`grid h-10 w-10 shrink-0 place-items-center rounded-2xl transition ${
+        listening ? 'bg-fp-bad-soft text-fp-bad' : 'text-[#8A877C] hover:bg-[#EEEDE4] hover:text-[#1F1E1D]'
       }`}
       title="Voice input"
       onClick={toggle}
@@ -437,7 +438,7 @@ function AssistantBody({ text }: { text: string }) {
   }
 
   return (
-    <div className="md-body rounded-2xl rounded-tl-md border border-fp-line bg-fp-bg px-4 py-3 text-sm leading-relaxed text-fp-ink">
+    <div className="md-body chat-serif">
       <ReactMarkdown remarkPlugins={[remarkGfm]}>{text}</ReactMarkdown>
     </div>
   );

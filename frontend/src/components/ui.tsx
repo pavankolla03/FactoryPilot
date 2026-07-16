@@ -33,10 +33,16 @@ export const paths = {
   logout: 'M15 12H4m0 0l3.5-3.5M4 12l3.5 3.5M10 4h8a2 2 0 012 2v12a2 2 0 01-2 2h-8',
 };
 
-export function LogoMark({ size = 34 }: { size?: number }) {
+export function LogoMark({ size = 34, animate = false }: { size?: number; animate?: boolean }) {
   const gradientId = useId();
   return (
-    <svg width={size} height={size} viewBox="0 0 40 40" fill="none" aria-hidden="true">
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 40 40"
+      fill="none"
+      aria-hidden="true"
+      className={animate ? 'logo-thinking' : undefined}>
       <rect x="2" y="2" width="36" height="36" rx="10" fill={`url(#${gradientId})`} />
       {/* factory silhouette */}
       <path d="M9.5 29.5v-9.2l6.2 3.9v-3.9l6.2 3.9v-3.9l6.2 3.9v5.3h-18.6z" fill="white" />
