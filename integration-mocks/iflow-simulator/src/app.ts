@@ -76,6 +76,37 @@ export function createApp(state = new IflowState()) {
     });
   });
 
+  app.get('/iflow/summary', (req, res) => {
+    const warehouseId = String(req.query.warehouseId || '');
+    if (!warehouseId) {
+      return res.status(400).json(errorResponse('VALIDATION_ERROR', 'warehouseId is required'));
+    }
+    return res.json(state.getWarehouseSummary(warehouseId));
+  });
+
+  app.get('/iflow/materials-search', (req, res) => {
+    const query = String(req.query.q || '').trim();
+    if (!query) {
+      return res.status(400).json(errorResponse('VALIDATION_ERROR', 'q is required'));
+    }
+    return res.json({ records: state.searchMaterials(query) });
+  });
+
+  app.get('/iflow/low-stock', (req, res) => {
+    const warehouseId = String(req.query.warehouseId || '');
+    if (!warehouseId) {
+      return res.status(400).json(errorResponse('VALIDATION_ERROR', 'warehouseId is required'));
+    }
+    const threshold = Number(req.query.threshold || 50);
+    return res.json({ records: state.getLowStock(warehouseId, threshold) });
+  });
+
+  app.get('/iflow/purchase-orders', (req, res) => {
+    const warehouseId = req.query.warehouseId ? String(req.query.warehouseId) : undefined;
+    const status = req.query.status ? String(req.query.status) : undefined;
+    return res.json({ records: state.getPurchaseOrders(warehouseId, status) });
+  });
+
   app.post('/iflow/move', (req, res) => {
     const parsed = moveBodySchema.safeParse(req.body);
     if (!parsed.success) {

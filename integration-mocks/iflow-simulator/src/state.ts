@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
-import type { Material, MovementRecord, StockRecord } from './types';
+import type { Material, MovementRecord, PurchaseOrder, StockRecord } from './types';
 
 const fixturesDir = path.join(__dirname, '..', 'fixtures');
 
@@ -14,11 +14,80 @@ export class IflowState {
   materials: Material[];
   stocks: StockRecord[];
   movements: MovementRecord[];
+  purchaseOrders: PurchaseOrder[];
 
   constructor() {
     this.materials = readFixture<Material[]>('materials.json');
     this.stocks = readFixture<StockRecord[]>('stocks.json');
     this.movements = readFixture<MovementRecord[]>('movements.json');
+    this.purchaseOrders = readFixture<PurchaseOrder[]>('purchase-orders.json');
+  }
+
+  searchMaterials(query: string): Array<Material & { totalStock: number }> {
+    const q = query.toLowerCase();
+    return this.materials
+      .filter(
+        (m) =>
+          m.materialId.toLowerCase().includes(q) ||
+          m.productId.toLowerCase().includes(q) ||
+          m.description.toLowerCase().includes(q) ||
+          m.materialType.toLowerCase() === q,
+      )
+      .map((m) => ({
+        ...m,
+        totalStock: this.stocks
+          .filter((s) => s.materialId === m.materialId)
+          .reduce((sum, s) => sum + s.quantity, 0),
+      }));
+  }
+
+  getWarehouseSummary(warehouseId: string) {
+    const stocks = this.stocks.filter((s) => s.warehouseId === warehouseId);
+    const byLocation: Record<string, number> = {};
+    for (const s of stocks) {
+      byLocation[s.location] = (byLocation[s.location] || 0) + s.quantity;
+    }
+    const dayAgo = Date.now() - 24 * 60 * 60 * 1000;
+    return {
+      warehouseId,
+      distinctMaterials: new Set(stocks.map((s) => s.materialId)).size,
+      totalQuantity: stocks.reduce((sum, s) => sum + s.quantity, 0),
+      byLocation,
+      movementsLast24h: this.movements.filter(
+        (m) => m.warehouseId === warehouseId && new Date(m.timestamp).getTime() >= dayAgo,
+      ).length,
+      openPurchaseOrders: this.purchaseOrders.filter(
+        (po) => po.warehouseId === warehouseId && po.status !== 'delivered',
+      ).length,
+    };
+  }
+
+  getLowStock(warehouseId: string, threshold: number) {
+    return this.stocks
+      .filter((s) => s.warehouseId === warehouseId && s.quantity < threshold)
+      .map((s) => ({
+        ...s,
+        description: this.getMaterial(s.materialId)?.description ?? '',
+        inboundQty: this.purchaseOrders
+          .filter(
+            (po) =>
+              po.materialId === s.materialId && po.warehouseId === warehouseId && po.status !== 'delivered',
+          )
+          .reduce((sum, po) => sum + po.qty, 0),
+      }))
+      .sort((a, b) => a.quantity - b.quantity);
+  }
+
+  getPurchaseOrders(warehouseId?: string, status?: string): PurchaseOrder[] {
+    return this.purchaseOrders.filter((po) => {
+      if (warehouseId && po.warehouseId !== warehouseId) {
+        return false;
+      }
+      if (status && po.status !== status) {
+        return false;
+      }
+      return true;
+    });
   }
 
   getMaterial(materialId: string): Material | undefined {

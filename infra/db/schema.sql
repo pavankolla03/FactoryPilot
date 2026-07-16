@@ -85,6 +85,34 @@ CREATE TABLE IF NOT EXISTS session_logs (
   created_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
 
+CREATE TABLE IF NOT EXISTS stock_alerts (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  warehouse_id TEXT NOT NULL,
+  material_id TEXT NOT NULL,
+  threshold INT NOT NULL,
+  active BOOLEAN NOT NULL DEFAULT true,
+  triggered BOOLEAN NOT NULL DEFAULT false,
+  created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+  last_triggered_at TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS notifications (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  title TEXT NOT NULL,
+  body TEXT NOT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+  read_at TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS approval_policies (
+  user_id UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  auto_approve_max_qty INT
+);
+
+CREATE INDEX IF NOT EXISTS idx_stock_alerts_active ON stock_alerts (active);
+CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications (user_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_user_scopes_user_id ON user_scopes (user_id);
 CREATE INDEX IF NOT EXISTS idx_token_usage_user_time ON token_usage (user_id, occurred_at);
 CREATE INDEX IF NOT EXISTS idx_conversations_user_id ON conversations (user_id);

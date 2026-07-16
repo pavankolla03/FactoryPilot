@@ -10,8 +10,33 @@ import { McpService } from '../mcp/mcp.service';
 import { QuotaService } from '../quota/quota.service';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
 import { RedisService } from '../common/redis.service';
+import { AlertsService } from '../alerts/alerts.service';
+import type { NormalizedToolCall } from '../llm/types';
 
 const WRITE_TOOLS = new Set(['moveStock']);
+
+// Tools served by the orchestrator itself (user-scoped state), not by an MCP server.
+const LOCAL_TOOLS = [
+  {
+    name: 'createStockAlert',
+    description:
+      'Create a stock alert for the current user. They will be notified when the total stock of a material in a warehouse drops below the threshold. Use when the user asks to be alerted, notified, or watched about stock levels.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        warehouseId: { type: 'string' },
+        materialId: { type: 'string' },
+        threshold: { type: 'number' },
+      },
+      required: ['warehouseId', 'materialId', 'threshold'],
+    },
+  },
+  {
+    name: 'listStockAlerts',
+    description: "List the current user's active stock alerts.",
+    inputSchema: { type: 'object', properties: {} },
+  },
+];
 
 @Injectable()
 export class ChatService {
@@ -25,6 +50,7 @@ export class ChatService {
     private readonly mcp: McpService,
     private readonly quota: QuotaService,
     private readonly realtime: RealtimeGateway,
+    private readonly alerts: AlertsService,
   ) {}
 
   async getUsage(userId: string) {
@@ -53,12 +79,13 @@ export class ChatService {
     const convId = conversationId || (await this.createConversation(user.id, message));
     await this.insertMessage(convId, 'user', message);
 
-    const tools = this.mcp.listTools();
+    const tools = [...this.mcp.listTools(), ...LOCAL_TOOLS];
     const systemPrompt =
       'You are a SAP manufacturing assistant. Always include warehouseId for warehouse-touching tools. ' +
       'If warehouseId is unknown, ask the user. Never claim a write action has already completed before confirmation. ' +
       'Invoke tools ONLY through the function-calling mechanism; never print a JSON tool call as text. ' +
-      'Copy parameter values exactly as the user stated them (e.g. location names like "packing" or "shipping").';
+      'Copy parameter values exactly as the user stated them (e.g. location names like "packing" or "shipping"). ' +
+      'You can create stock alerts (createStockAlert) when the user asks to be notified about stock levels.';
 
     const conversationHistory = await this.getConversationMessages(convId);
     const llmMessages: LlmChatMessage[] = [{ role: 'system', content: systemPrompt }, ...conversationHistory];
@@ -117,57 +144,25 @@ export class ChatService {
           });
           await this.insertMessage(convId, 'assistant', completion.text || '', completion.toolCalls);
 
+          const writeCalls: NormalizedToolCall[] = [];
+
           for (const call of completion.toolCalls) {
             invokedTools.push(call.name);
 
-            const toolDesc = this.mcp.getTool(call.name);
+            const toolDesc = this.getToolDescriptor(call.name);
             const warehouseId = (call.arguments.warehouseId as string | undefined) || undefined;
             if (this.requiresWarehouseScope(toolDesc?.inputSchema)) {
               this.assertScope(user, warehouseId, WRITE_TOOLS.has(call.name) ? 'write' : 'read');
             }
 
             if (WRITE_TOOLS.has(call.name)) {
-              const action: PendingAction = {
-                actionId: randomUUID(),
-                tool: call.name,
-                params: call.arguments,
-                humanSummary: `Confirm ${call.name} with parameters ${JSON.stringify(call.arguments)}`,
-              };
-
-              await this.redis.raw.setEx(
-                `pending:action:${action.actionId}`,
-                900,
-                JSON.stringify({ userId: user.id, action }),
-              );
-              this.realtime.emitPendingAction(user.id, action);
-
-              const assistantText = 'I prepared a write action. Please confirm to execute.';
-              await this.insertMessage(convId, 'assistant', assistantText);
-              const msgId = randomUUID();
-              this.realtime.emitChatToken(user.id, { conversationId: convId, delta: assistantText });
-              this.realtime.emitChatDone(user.id, { conversationId: convId, messageId: msgId, source: 'live' });
-
-              await this.writeSessionLog({
-                userId: user.id,
-                conversationId: convId,
-                queryText: message,
-                toolsInvoked: invokedTools,
-                cacheStatus: 'n/a',
-                tokensUsed: totalTokens,
-                status: 'success',
-                latencyMs: Date.now() - start,
-              });
-
-              return {
-                conversationId: convId,
-                messageId: msgId,
-                text: assistantText,
-                source: 'live',
-                pendingAction: action,
-              };
+              writeCalls.push(call);
+              continue;
             }
 
-            const { data, cacheHit } = await this.readToolWithCache(call.name, call.arguments);
+            const { data, cacheHit } = this.isLocalTool(call.name)
+              ? { data: await this.executeLocalTool(user, call.name, call.arguments), cacheHit: false }
+              : await this.readToolWithCache(call.name, call.arguments);
             source = cacheHit ? 'cache' : source;
             const toolContent = JSON.stringify(data);
             llmMessages.push({
@@ -177,6 +172,78 @@ export class ChatService {
               content: toolContent,
             });
             await this.insertMessage(convId, 'tool', toolContent, { toolCallId: call.id, name: call.name });
+          }
+
+          if (writeCalls.length > 0) {
+            const autoMax = await this.getAutoApproveMaxQty(user.id);
+            const allAutoApprovable =
+              autoMax !== null &&
+              writeCalls.every((c) => Number.isFinite(Number(c.arguments.qty)) && Number(c.arguments.qty) <= autoMax);
+
+            if (allAutoApprovable) {
+              // Policy allows executing these writes without human sign-off.
+              for (const call of writeCalls) {
+                const result = await this.executeWriteTool(call.name, call.arguments);
+                const toolContent = JSON.stringify({ ...result, autoApproved: true, policyMaxQty: autoMax });
+                llmMessages.push({ role: 'tool', name: call.name, toolCallId: call.id, content: toolContent });
+                await this.insertMessage(convId, 'tool', toolContent, { toolCallId: call.id, name: call.name });
+              }
+              continue;
+            }
+
+            const action: PendingAction =
+              writeCalls.length === 1
+                ? {
+                    actionId: randomUUID(),
+                    tool: writeCalls[0].name,
+                    params: writeCalls[0].arguments,
+                    humanSummary: `Confirm ${writeCalls[0].name} with parameters ${JSON.stringify(writeCalls[0].arguments)}`,
+                  }
+                : {
+                    actionId: randomUUID(),
+                    tool: 'batch',
+                    params: {
+                      steps: writeCalls.map((c) => ({ tool: c.name, params: c.arguments })),
+                    },
+                    humanSummary: `Confirm ${writeCalls.length} operations: ${writeCalls
+                      .map((c) => c.name)
+                      .join(', ')}`,
+                  };
+
+            await this.redis.raw.setEx(
+              `pending:action:${action.actionId}`,
+              900,
+              JSON.stringify({ userId: user.id, action }),
+            );
+            this.realtime.emitPendingAction(user.id, action);
+
+            const assistantText =
+              writeCalls.length === 1
+                ? 'I prepared a write action. Please confirm to execute.'
+                : `I prepared ${writeCalls.length} write actions as one workflow. Please confirm to execute.`;
+            await this.insertMessage(convId, 'assistant', assistantText);
+            const msgId = randomUUID();
+            this.realtime.emitChatToken(user.id, { conversationId: convId, delta: assistantText });
+            this.realtime.emitChatDone(user.id, { conversationId: convId, messageId: msgId, source: 'live' });
+
+            await this.writeSessionLog({
+              userId: user.id,
+              conversationId: convId,
+              queryText: message,
+              toolsInvoked: invokedTools,
+              cacheStatus: 'n/a',
+              tokensUsed: totalTokens,
+              status: 'success',
+              latencyMs: Date.now() - start,
+            });
+
+            return {
+              conversationId: convId,
+              messageId: msgId,
+              text: assistantText,
+              source: 'live',
+              pendingAction: action,
+            };
           }
           continue;
         }
@@ -242,32 +309,58 @@ export class ChatService {
       actionExpired();
     }
 
-    const params = payload.action.params;
-    const warehouseId = params.warehouseId as string | undefined;
-    this.assertScope(user, warehouseId, 'write');
+    const steps: Array<{ tool: string; params: Record<string, unknown> }> =
+      payload.action.tool === 'batch'
+        ? ((payload.action.params.steps || []) as Array<{ tool: string; params: Record<string, unknown> }>)
+        : [{ tool: payload.action.tool, params: payload.action.params }];
 
-    let result: Record<string, unknown>;
-    try {
-      result = await this.mcp.callTool(payload.action.tool, params);
-    } catch (error) {
-      const reason = error instanceof Error ? error.message : 'tool call failed';
-      await this.writeSessionLog({
-        userId: user.id,
-        conversationId: null,
-        queryText: `confirm-action:${actionId}`,
-        toolsInvoked: [payload.action.tool],
-        cacheStatus: 'n/a',
-        tokensUsed: 0,
-        status: 'error',
-        latencyMs: 0,
-      });
-      if (reason.includes('INSUFFICIENT_STOCK')) {
-        throwApiError(400, 'INSUFFICIENT_STOCK', reason);
-      }
-      validationError(reason);
+    for (const step of steps) {
+      this.assertScope(user, step.params.warehouseId as string | undefined, 'write');
     }
 
-    if (payload.action.tool === 'moveStock') {
+    const results: Array<Record<string, unknown>> = [];
+    for (const [index, step] of steps.entries()) {
+      try {
+        results.push(await this.executeWriteTool(step.tool, step.params));
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : 'tool call failed';
+        await this.writeSessionLog({
+          userId: user.id,
+          conversationId: null,
+          queryText: `confirm-action:${actionId}`,
+          toolsInvoked: steps.map((s) => s.tool),
+          cacheStatus: 'n/a',
+          tokensUsed: 0,
+          status: 'error',
+          latencyMs: 0,
+        });
+        const prefix = steps.length > 1 ? `Step ${index + 1}/${steps.length} (${step.tool}) failed: ` : '';
+        if (reason.includes('INSUFFICIENT_STOCK')) {
+          throwApiError(400, 'INSUFFICIENT_STOCK', `${prefix}${reason}`);
+        }
+        validationError(`${prefix}${reason}`);
+      }
+    }
+
+    await this.writeSessionLog({
+      userId: user.id,
+      conversationId: null,
+      queryText: `confirm-action:${actionId}`,
+      toolsInvoked: steps.map((s) => s.tool),
+      cacheStatus: 'n/a',
+      tokensUsed: 0,
+      status: 'success',
+      latencyMs: 0,
+    });
+
+    return { success: true, actionId, result: steps.length === 1 ? results[0] : { steps: results } };
+  }
+
+  /** Executes a write tool through MCP and maintains the caches it touches. */
+  private async executeWriteTool(tool: string, params: Record<string, unknown>) {
+    const result = await this.mcp.callTool(tool, params);
+
+    if (tool === 'moveStock') {
       const warehouse = String(params.warehouseId || 'global');
       await this.invalidateWarehouseCache(warehouse);
       const movement = (result?.structuredContent || result) as Record<string, unknown>;
@@ -277,18 +370,63 @@ export class ChatService {
       });
     }
 
-    await this.writeSessionLog({
-      userId: user.id,
-      conversationId: null,
-      queryText: `confirm-action:${actionId}`,
-      toolsInvoked: [payload.action.tool],
-      cacheStatus: 'n/a',
-      tokensUsed: 0,
-      status: 'success',
-      latencyMs: 0,
-    });
+    return result;
+  }
 
-    return { success: true, actionId, result };
+  private isLocalTool(name: string) {
+    return LOCAL_TOOLS.some((t) => t.name === name);
+  }
+
+  private getToolDescriptor(name: string): { inputSchema?: Record<string, unknown> } | undefined {
+    return this.mcp.getTool(name) || LOCAL_TOOLS.find((t) => t.name === name);
+  }
+
+  private async executeLocalTool(user: AuthUser, name: string, args: Record<string, unknown>) {
+    if (name === 'createStockAlert') {
+      const alert = await this.alerts.createAlert(
+        user,
+        String(args.warehouseId || ''),
+        String(args.materialId || ''),
+        Number(args.threshold),
+      );
+      return {
+        structuredContent: {
+          created: true,
+          alert: {
+            id: alert.id,
+            warehouseId: alert.warehouse_id,
+            materialId: alert.material_id,
+            threshold: alert.threshold,
+          },
+          note: 'The user will be notified when total stock drops below the threshold.',
+        },
+      };
+    }
+
+    if (name === 'listStockAlerts') {
+      const rows = await this.alerts.listAlerts(user.id);
+      return {
+        structuredContent: {
+          records: rows.map((r) => ({
+            id: r.id,
+            warehouseId: r.warehouse_id,
+            materialId: r.material_id,
+            threshold: r.threshold,
+            triggered: r.triggered,
+          })),
+        },
+      };
+    }
+
+    validationError(`Unknown local tool: ${name}`);
+  }
+
+  private async getAutoApproveMaxQty(userId: string): Promise<number | null> {
+    const row = await this.db.query<{ auto_approve_max_qty: number | null }>(
+      'SELECT auto_approve_max_qty FROM approval_policies WHERE user_id = $1',
+      [userId],
+    );
+    return row.rows[0]?.auto_approve_max_qty ?? null;
   }
 
   private assertScope(user: AuthUser, warehouseId: string | undefined, need: 'read' | 'write' = 'read') {

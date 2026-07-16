@@ -1,0 +1,12 @@
+[
+  { "poNumber": "PO-4500012345", "materialId": "MAT-10023456", "productId": "P123", "warehouseId": "1010", "qty": 200, "supplier": "Rheinwerk Metallbau GmbH", "status": "in_transit", "orderedAt": "2026-07-08", "expectedDelivery": "2026-07-19" },
+  { "poNumber": "PO-4500012346", "materialId": "MAT-10023458", "productId": "P125", "warehouseId": "1010", "qty": 500, "supplier": "CuTech Windings Ltd", "status": "open", "orderedAt": "2026-07-12", "expectedDelivery": "2026-07-26" },
+  { "poNumber": "PO-4500012347", "materialId": "MAT-10023459", "productId": "P126", "warehouseId": "1010", "qty": 120, "supplier": "SKF Distribution", "status": "delivered", "orderedAt": "2026-06-28", "expectedDelivery": "2026-07-10" },
+  { "poNumber": "PO-4500012348", "materialId": "MAT-10023461", "productId": "P128", "warehouseId": "1020", "qty": 150, "supplier": "Bracket & Frame Co", "status": "in_transit", "orderedAt": "2026-07-10", "expectedDelivery": "2026-07-18" },
+  { "poNumber": "PO-4500012349", "materialId": "MAT-10023462", "productId": "P129", "warehouseId": "1020", "qty": 80, "supplier": "CircuitWorks Asia", "status": "open", "orderedAt": "2026-07-14", "expectedDelivery": "2026-08-01" },
+  { "poNumber": "PO-4500012350", "materialId": "MAT-10023465", "productId": "P132", "warehouseId": "1030", "qty": 60, "supplier": "ShaftPro Machining", "status": "in_transit", "orderedAt": "2026-07-11", "expectedDelivery": "2026-07-17" },
+  { "poNumber": "PO-4500012351", "materialId": "MAT-10023468", "productId": "P135", "warehouseId": "1040", "qty": 90, "supplier": "MotorCore Industries", "status": "open", "orderedAt": "2026-07-15", "expectedDelivery": "2026-07-29" },
+  { "poNumber": "PO-4500012352", "materialId": "MAT-10023474", "productId": "P141", "warehouseId": "1050", "qty": 40, "supplier": "Precision Jig Works", "status": "in_transit", "orderedAt": "2026-07-09", "expectedDelivery": "2026-07-16" },
+  { "poNumber": "PO-4500012353", "materialId": "MAT-10023471", "productId": "P138", "warehouseId": "1050", "qty": 1000, "supplier": "BoltMaster Supply", "status": "delivered", "orderedAt": "2026-06-30", "expectedDelivery": "2026-07-08" },
+  { "poNumber": "PO-4500012354", "materialId": "MAT-10023464", "productId": "P131", "warehouseId": "1030", "qty": 110, "supplier": "Airflow Components", "status": "open", "orderedAt": "2026-07-13", "expectedDelivery": "2026-07-24" }
+]

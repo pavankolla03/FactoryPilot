@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { EmptyState, Icon, initialsOf, paths } from './ui';
+import { useI18n } from '../i18n';
 
 export type AdminUser = {
   id: string;
@@ -7,6 +8,7 @@ export type AdminUser = {
   display_name: string;
   role: 'admin' | 'viewer';
   monthly_token_limit: number;
+  auto_approve_max_qty: number | null;
   scopes: Array<{ warehouse_id: string; access_level: 'read' | 'write' }>;
 };
 
@@ -16,13 +18,16 @@ export function UsersPage({
   onDelete,
   onQuota,
   onScopes,
+  onPolicy,
 }: {
   users: AdminUser[];
   onCreate: (u: { email: string; display_name: string; role: 'admin' | 'viewer' }) => Promise<void>;
   onDelete: (id: string) => Promise<void>;
   onQuota: (id: string, limit: number) => Promise<void>;
   onScopes: (id: string, scopes: AdminUser['scopes']) => Promise<void>;
+  onPolicy: (id: string, maxQty: number | null) => Promise<void>;
 }) {
+  const { t } = useI18n();
   const [email, setEmail] = useState('');
   const [name, setName] = useState('');
   const [role, setRole] = useState<'admin' | 'viewer'>('viewer');
@@ -30,7 +35,7 @@ export function UsersPage({
   return (
     <div className="space-y-5">
       <section className="card p-5">
-        <h3 className="mb-3 text-sm font-semibold text-fp-ink">Invite a user</h3>
+        <h3 className="mb-3 text-sm font-semibold text-fp-ink">{t('users.invite')}</h3>
         <div className="grid gap-2.5 md:grid-cols-[1.4fr_1.2fr_1fr_auto]">
           <input className="input" placeholder="Work email" value={email} onChange={(e) => setEmail(e.target.value)} />
           <input className="input" placeholder="Display name" value={name} onChange={(e) => setName(e.target.value)} />
@@ -61,7 +66,7 @@ export function UsersPage({
       ) : (
         <div className="space-y-4">
           {users.map((u) => (
-            <UserCard key={u.id} user={u} onDelete={onDelete} onQuota={onQuota} onScopes={onScopes} />
+            <UserCard key={u.id} user={u} onDelete={onDelete} onQuota={onQuota} onScopes={onScopes} onPolicy={onPolicy} />
           ))}
         </div>
       )}
@@ -74,13 +79,17 @@ function UserCard({
   onDelete,
   onQuota,
   onScopes,
+  onPolicy,
 }: {
   user: AdminUser;
   onDelete: (id: string) => Promise<void>;
   onQuota: (id: string, limit: number) => Promise<void>;
   onScopes: (id: string, scopes: AdminUser['scopes']) => Promise<void>;
+  onPolicy: (id: string, maxQty: number | null) => Promise<void>;
 }) {
+  const { t } = useI18n();
   const [quota, setQuota] = useState(String(user.monthly_token_limit ?? 50000));
+  const [policyQty, setPolicyQty] = useState(user.auto_approve_max_qty === null ? '' : String(user.auto_approve_max_qty));
   const [warehouse, setWarehouse] = useState('');
   const [level, setLevel] = useState<'read' | 'write'>('read');
   const scopes = user.scopes || [];
@@ -130,7 +139,33 @@ function UserCard({
 
       <div className="mt-4 border-t border-fp-line pt-4">
         <div className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-fp-ink-3">
-          Warehouse access {user.role === 'admin' && '· administrators access all warehouses'}
+          {t('users.autoApprove')}
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <input
+            className="input !w-28 py-2 text-xs"
+            placeholder="—"
+            value={policyQty}
+            onChange={(e) => setPolicyQty(e.target.value.replace(/[^0-9]/g, ''))}
+          />
+          <button
+            className="btn-ghost px-3 py-2 text-xs"
+            onClick={() => void onPolicy(user.id, policyQty === '' ? null : Number(policyQty))}
+          >
+            <Icon path={paths.check} size={12} strokeWidth={2.4} />
+            Save
+          </button>
+          <span className="text-[11px] text-fp-ink-3">
+            {user.auto_approve_max_qty === null
+              ? t('users.autoApproveOff')
+              : `≤ ${user.auto_approve_max_qty}`}
+          </span>
+        </div>
+      </div>
+
+      <div className="mt-4 border-t border-fp-line pt-4">
+        <div className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-fp-ink-3">
+          {t('users.warehouseAccess')} {user.role === 'admin' && `· ${t('users.adminAll')}`}
         </div>
 
         {user.role !== 'admin' && (

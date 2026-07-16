@@ -25,6 +25,11 @@ export const paths = {
   plus: 'M12 5v14M5 12h14',
   trash: 'M5 7h14M9 7V5h6v2m-8 0l1 13h8l1-13',
   warehouse: 'M3 9l9-5 9 5v11H3V9zm4 11v-7h10v7M9 16h6',
+  bell: 'M18 9a6 6 0 10-12 0c0 6-2.5 7-2.5 7h17S18 15 18 9zm-4.3 10a2 2 0 01-3.4 0',
+  mic: 'M12 3a3 3 0 013 3v5a3 3 0 11-6 0V6a3 3 0 013-3zm-7 8a7 7 0 0014 0M12 18v3',
+  globe: 'M12 3a9 9 0 100 18 9 9 0 000-18zm-9 9h18M12 3c2.5 2.4 4 5.6 4 9s-1.5 6.6-4 9c-2.5-2.4-4-5.6-4-9s1.5-6.6 4-9z',
+  download: 'M12 4v11m0 0l-4-4m4 4l4-4M5 20h14',
+  history: 'M4 6v5h5M4.5 11A8 8 0 1112 20a8 8 0 01-7.5-9zM12 8v4l3 2',
 };
 
 export function LogoMark({ size = 34 }: { size?: number }) {
@@ -32,10 +37,15 @@ export function LogoMark({ size = 34 }: { size?: number }) {
   return (
     <svg width={size} height={size} viewBox="0 0 40 40" fill="none" aria-hidden="true">
       <rect x="2" y="2" width="36" height="36" rx="10" fill={`url(#${gradientId})`} />
+      {/* factory silhouette */}
+      <path d="M9.5 29.5v-9.2l6.2 3.9v-3.9l6.2 3.9v-3.9l6.2 3.9v5.3h-18.6z" fill="white" />
+      {/* chimney */}
+      <path d="M12 20.5v-8h3.4v8" fill="white" />
+      {/* pilot arrow */}
       <path
-        d="M13 27V13h9.5a4.5 4.5 0 110 9H17m0 0l9 5"
+        d="M22.5 11.5h8m0 0-3-3m3 3-3 3"
         stroke="white"
-        strokeWidth="2.6"
+        strokeWidth="2.4"
         strokeLinecap="round"
         strokeLinejoin="round"
       />

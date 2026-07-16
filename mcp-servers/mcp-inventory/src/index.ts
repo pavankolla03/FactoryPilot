@@ -80,6 +80,84 @@ function buildServer(): McpServer {
     },
   );
 
+  mcpServer.registerTool(
+    'getWarehouseSummary',
+    {
+      title: 'Get a warehouse overview',
+      description:
+        'Returns an aggregate summary for a warehouse: distinct materials, total quantity, quantity by location, movements in the last 24h, open purchase orders',
+      inputSchema: {
+        warehouseId: z.string(),
+      },
+    },
+    async ({ warehouseId }) => {
+      const result = await iflowGet('/iflow/summary', { warehouseId });
+      return {
+        content: [{ type: 'text', text: JSON.stringify(result) }],
+        structuredContent: result,
+      };
+    },
+  );
+
+  mcpServer.registerTool(
+    'searchMaterials',
+    {
+      title: 'Search the material master',
+      description:
+        'Searches materials by id, product id, description text, or material type (FERT/HALB/ROH). Global material master data, not warehouse-scoped. Returns each match with its total stock across all warehouses.',
+      inputSchema: {
+        query: z.string(),
+      },
+    },
+    async ({ query }) => {
+      const result = await iflowGet('/iflow/materials-search', { q: query });
+      return {
+        content: [{ type: 'text', text: JSON.stringify(result) }],
+        structuredContent: result,
+      };
+    },
+  );
+
+  mcpServer.registerTool(
+    'getLowStock',
+    {
+      title: 'List low-stock positions in a warehouse',
+      description:
+        'Returns stock positions below a quantity threshold (default 50) in a warehouse, including inbound purchase-order quantity for each material',
+      inputSchema: {
+        warehouseId: z.string(),
+        threshold: z.coerce.number().int().positive().optional(),
+      },
+    },
+    async ({ warehouseId, threshold }) => {
+      const result = await iflowGet('/iflow/low-stock', { warehouseId, threshold });
+      return {
+        content: [{ type: 'text', text: JSON.stringify(result) }],
+        structuredContent: result,
+      };
+    },
+  );
+
+  mcpServer.registerTool(
+    'getPurchaseOrders',
+    {
+      title: 'List purchase orders for a warehouse',
+      description:
+        'Returns purchase orders for a warehouse, optionally filtered by status (open, in_transit, delivered), with supplier and expected delivery dates',
+      inputSchema: {
+        warehouseId: z.string(),
+        status: z.enum(['open', 'in_transit', 'delivered']).optional(),
+      },
+    },
+    async ({ warehouseId, status }) => {
+      const result = await iflowGet('/iflow/purchase-orders', { warehouseId, status });
+      return {
+        content: [{ type: 'text', text: JSON.stringify(result) }],
+        structuredContent: result,
+      };
+    },
+  );
+
   return mcpServer;
 }
 

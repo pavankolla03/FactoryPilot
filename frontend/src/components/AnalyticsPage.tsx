@@ -10,6 +10,7 @@ import {
 } from 'recharts';
 import type { SessionLogEntry } from '@manufacturing-agent/shared';
 import { Icon, paths } from './ui';
+import { useI18n } from '../i18n';
 
 type TokenRow = { user_id: string; email: string; day: string; total_tokens: number };
 
@@ -18,12 +19,15 @@ export function AnalyticsPage({
   tokenRows,
   sessionLogs,
   isAdmin,
+  onExport,
 }: {
   usage: { used: number; limit: number; periodStart: string };
   tokenRows: TokenRow[];
   sessionLogs: SessionLogEntry[];
   isAdmin: boolean;
+  onExport: () => void;
 }) {
+  const { t } = useI18n();
   const byDay = useMemo(() => {
     const acc = new Map<string, number>();
     for (const row of tokenRows) {
@@ -56,7 +60,7 @@ export function AnalyticsPage({
       <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <div className="card p-5">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold uppercase tracking-wider text-fp-ink-3">Tokens this month</span>
+            <span className="text-xs font-semibold uppercase tracking-wider text-fp-ink-3">{t('usage.tokens')}</span>
             <Icon path={paths.spark} size={16} strokeWidth={2} />
           </div>
           <div className="mt-2 text-[26px] font-semibold tracking-tight text-fp-ink">
@@ -70,17 +74,21 @@ export function AnalyticsPage({
           </div>
         </div>
 
-        <StatTile icon={paths.chat} label="Requests logged" value={stats.requests.toLocaleString()} note="last 500 shown" />
-        <StatTile icon={paths.db} label="Cache hit rate" value={`${stats.cacheRate}%`} note="of cacheable reads" />
-        <StatTile icon={paths.clock} label="Avg. latency" value={`${stats.avgLatency.toLocaleString()} ms`} note="per request" />
+        <StatTile icon={paths.chat} label={t('usage.requests')} value={stats.requests.toLocaleString()} note="last 500 shown" />
+        <StatTile icon={paths.db} label={t('usage.cacheRate')} value={`${stats.cacheRate}%`} note="of cacheable reads" />
+        <StatTile icon={paths.clock} label={t('usage.latency')} value={`${stats.avgLatency.toLocaleString()} ms`} note="per request" />
       </section>
 
       <section className="card p-6">
         <div className="mb-1 flex items-center justify-between">
           <div>
-            <h3 className="text-sm font-semibold text-fp-ink">Token consumption per day</h3>
+            <h3 className="text-sm font-semibold text-fp-ink">{t('usage.chartTitle')}</h3>
             <p className="text-xs text-fp-ink-3">{isAdmin ? 'All users' : 'Your usage'} · resets {usage.periodStart || 'monthly'}</p>
           </div>
+          <button className="btn-ghost px-3 py-2 text-xs" onClick={onExport}>
+            <Icon path={paths.download} size={13} strokeWidth={2.2} />
+            {t('export.csv')}
+          </button>
         </div>
 
         <div className="h-[300px]">
@@ -121,7 +129,7 @@ export function AnalyticsPage({
       {isAdmin && (
         <section className="card overflow-hidden">
           <div className="border-b border-fp-line px-6 py-4">
-            <h3 className="text-sm font-semibold text-fp-ink">Usage by user and day</h3>
+            <h3 className="text-sm font-semibold text-fp-ink">{t('usage.byUser')}</h3>
           </div>
           <div className="max-h-[320px] overflow-auto">
             <table className="w-full">

@@ -1,7 +1,20 @@
-import { Controller, Get, Query, UseGuards } from '@nestjs/common';
+import { Controller, Get, Query, Res, UseGuards } from '@nestjs/common';
+import type { Response } from 'express';
 import { AuthGuard, CurrentUser } from '../auth/auth.guard';
 import type { AuthUser } from '../common/types';
 import { DbService } from '../common/db.service';
+
+function toCsv(rows: Array<Record<string, unknown>>, columns: string[]): string {
+  const escape = (value: unknown) => {
+    const s = value === null || value === undefined ? '' : String(value);
+    return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  };
+  const lines = [columns.join(',')];
+  for (const row of rows) {
+    lines.push(columns.map((c) => escape(row[c])).join(','));
+  }
+  return lines.join('\n');
+}
 
 @Controller('/api')
 @UseGuards(AuthGuard)
@@ -71,5 +84,53 @@ export class LogsController {
 
     const rows = await this.db.query(sql, params);
     return rows.rows;
+  }
+
+  @Get('/session-logs/export.csv')
+  async sessionLogsCsv(@CurrentUser() user: AuthUser, @Res() res: Response) {
+    const rows = await this.db.query(
+      `SELECT created_at, query_text, status, tools_invoked_json::text AS tools, cache_status, tokens_used, latency_ms
+       FROM session_logs
+       WHERE user_id = $1
+       ORDER BY created_at DESC
+       LIMIT 2000`,
+      [user.id],
+    );
+    const csv = toCsv(rows.rows as Array<Record<string, unknown>>, [
+      'created_at',
+      'query_text',
+      'status',
+      'tools',
+      'cache_status',
+      'tokens_used',
+      'latency_ms',
+    ]);
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename="factorypilot-activity.csv"');
+    res.send(csv);
+  }
+
+  @Get('/token-usage/export.csv')
+  async tokenUsageCsv(@CurrentUser() user: AuthUser, @Res() res: Response) {
+    const params: unknown[] = [];
+    let where = 'WHERE 1=1';
+    if (user.role !== 'admin') {
+      params.push(user.id);
+      where += ` AND tu.user_id = $${params.length}`;
+    }
+
+    const rows = await this.db.query(
+      `SELECT DATE(tu.occurred_at) AS day, u.email, SUM(tu.total_tokens)::int AS total_tokens
+       FROM token_usage tu
+       JOIN users u ON u.id = tu.user_id
+       ${where}
+       GROUP BY DATE(tu.occurred_at), u.email
+       ORDER BY day DESC`,
+      params,
+    );
+    const csv = toCsv(rows.rows as Array<Record<string, unknown>>, ['day', 'email', 'total_tokens']);
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename="factorypilot-token-usage.csv"');
+    res.send(csv);
   }
 }

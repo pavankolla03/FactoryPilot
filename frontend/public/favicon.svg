@@ -1,0 +1,12 @@
+<svg width="40" height="40" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect x="2" y="2" width="36" height="36" rx="10" fill="url(#fpfav)" />
+  <path d="M9.5 29.5v-9.2l6.2 3.9v-3.9l6.2 3.9v-3.9l6.2 3.9v5.3h-18.6z" fill="white" />
+  <path d="M12 20.5v-8h3.4v8" fill="white" />
+  <path d="M22.5 11.5h8m0 0-3-3m3 3-3 3" stroke="white" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" />
+  <defs>
+    <linearGradient id="fpfav" x1="2" y1="2" x2="38" y2="38" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#2A78D6" />
+      <stop offset="1" stop-color="#1B4E94" />
+    </linearGradient>
+  </defs>
+</svg>

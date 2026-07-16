@@ -1,18 +1,32 @@
 import type { SessionLogEntry } from '@manufacturing-agent/shared';
-import { EmptyState, StatusChip, paths } from './ui';
+import { EmptyState, Icon, StatusChip, paths } from './ui';
+import { useI18n } from '../i18n';
 
-export function ActivityPage({ sessionLogs }: { sessionLogs: SessionLogEntry[] }) {
+export function ActivityPage({
+  sessionLogs,
+  onExport,
+}: {
+  sessionLogs: SessionLogEntry[];
+  onExport: () => void;
+}) {
+  const { t } = useI18n();
   return (
     <section className="card overflow-hidden">
       <div className="flex items-center justify-between border-b border-fp-line px-6 py-4">
         <div>
-          <h3 className="text-sm font-semibold text-fp-ink">Request activity</h3>
-          <p className="text-xs text-fp-ink-3">Every agent request — updated in real time</p>
+          <h3 className="text-sm font-semibold text-fp-ink">{t('logs.title')}</h3>
+          <p className="text-xs text-fp-ink-3">{t('logs.subtitle')}</p>
         </div>
-        <span className="flex items-center gap-2 text-xs font-medium text-fp-good">
-          <span className="live-dot" />
-          Live
-        </span>
+        <div className="flex items-center gap-3">
+          <button className="btn-ghost px-3 py-2 text-xs" onClick={onExport}>
+            <Icon path={paths.download} size={13} strokeWidth={2.2} />
+            {t('export.csv')}
+          </button>
+          <span className="flex items-center gap-2 text-xs font-medium text-fp-good">
+            <span className="live-dot" />
+            {t('logs.live')}
+          </span>
+        </div>
       </div>
 
       {sessionLogs.length === 0 ? (

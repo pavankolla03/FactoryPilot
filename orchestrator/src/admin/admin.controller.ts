@@ -38,9 +38,11 @@ export class AdminController {
               u.role,
               u.created_at,
               COALESCE(q.monthly_token_limit, 50000) AS monthly_token_limit,
+              p.auto_approve_max_qty,
               COALESCE(s.scopes, '[]'::json) AS scopes
        FROM users u
        LEFT JOIN user_quota q ON q.user_id = u.id
+       LEFT JOIN approval_policies p ON p.user_id = u.id
        LEFT JOIN (
          SELECT user_id,
                 json_agg(json_build_object('warehouse_id', warehouse_id, 'access_level', access_level)) AS scopes
@@ -129,6 +131,26 @@ export class AdminController {
       [id],
     );
     return quota.rows[0];
+  }
+
+  @Patch('/:id/policy')
+  async updatePolicy(@Param('id') id: string, @Body() body: unknown) {
+    const parsed = z
+      .object({ auto_approve_max_qty: z.number().int().positive().nullable() })
+      .parse(body);
+
+    if (parsed.auto_approve_max_qty === null) {
+      await this.db.query('DELETE FROM approval_policies WHERE user_id = $1', [id]);
+      return { user_id: id, auto_approve_max_qty: null };
+    }
+
+    await this.db.query(
+      `INSERT INTO approval_policies(user_id, auto_approve_max_qty)
+       VALUES($1, $2)
+       ON CONFLICT (user_id) DO UPDATE SET auto_approve_max_qty = EXCLUDED.auto_approve_max_qty`,
+      [id, parsed.auto_approve_max_qty],
+    );
+    return { user_id: id, auto_approve_max_qty: parsed.auto_approve_max_qty };
   }
 
   @Delete('/:id')

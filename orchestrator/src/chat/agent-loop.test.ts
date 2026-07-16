@@ -7,6 +7,7 @@ import type { LlmChatMessage, LlmCompletionResult } from '../llm/types';
 import type { McpService } from '../mcp/mcp.service';
 import type { QuotaService } from '../quota/quota.service';
 import type { RealtimeGateway } from '../realtime/realtime.gateway';
+import type { AlertsService } from '../alerts/alerts.service';
 import type { AuthUser } from '../common/types';
 
 interface StoredMessage {
@@ -121,7 +122,12 @@ function buildFakes() {
     emitSessionLog: () => undefined,
   } as unknown as RealtimeGateway;
 
-  return { db, redis, providerFactory, mcp, quota, realtime, providerRounds, sessionLogs, messages };
+  const alerts = {
+    createAlert: async () => ({ id: 'a1', warehouse_id: '1010', material_id: 'MAT-1', threshold: 10 }),
+    listAlerts: async () => [],
+  } as unknown as AlertsService;
+
+  return { db, redis, providerFactory, mcp, quota, realtime, alerts, providerRounds, sessionLogs, messages };
 }
 
 const user: AuthUser = {
@@ -142,6 +148,7 @@ describe('agent loop', () => {
       fakes.mcp,
       fakes.quota,
       fakes.realtime,
+      fakes.alerts,
     );
 
     const response = await service.chat(user, undefined, 'how much MAT-1 in 1010?');
@@ -171,6 +178,7 @@ describe('agent loop', () => {
       fakes.mcp,
       fakes.quota,
       fakes.realtime,
+      fakes.alerts,
     );
 
     await service.chat(user, undefined, 'how much MAT-1 in 1010?');

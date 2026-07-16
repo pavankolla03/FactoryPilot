@@ -25,6 +25,18 @@ export interface MovementRecord {
   status: 'confirmed';
 }
 
+export interface PurchaseOrder {
+  poNumber: string;
+  materialId: string;
+  productId: string;
+  warehouseId: string;
+  qty: number;
+  supplier: string;
+  status: 'open' | 'in_transit' | 'delivered';
+  orderedAt: string;
+  expectedDelivery: string;
+}
+
 export interface ApiErrorShape {
   error: {
     code:

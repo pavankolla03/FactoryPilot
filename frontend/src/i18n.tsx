@@ -1,0 +1,164 @@
+import { createContext, useContext, useMemo, useState, type ReactNode } from 'react';
+
+export type Lang = 'en' | 'de';
+
+const dict = {
+  en: {
+    'nav.workspace': 'Workspace',
+    'nav.assistant': 'Assistant',
+    'nav.usage': 'Usage & Cost',
+    'nav.activity': 'Activity',
+    'nav.access': 'Access Control',
+    'role.admin': 'Administrator',
+    'role.viewer': 'Operator',
+    'page.chat.title': 'Assistant',
+    'page.chat.subtitle': 'Ask about stock, materials, and movements — or operate the warehouse.',
+    'page.usage.title': 'Usage & Cost',
+    'page.usage.subtitle': 'Token consumption, budgets, and efficiency at a glance.',
+    'page.logs.title': 'Activity',
+    'page.logs.subtitle': 'A live audit trail of every request the agent handled.',
+    'page.users.title': 'Access Control',
+    'page.users.subtitle': 'Who can see and operate which warehouse, and on what budget.',
+    'chat.empty.title': 'Ask anything about your warehouses',
+    'chat.empty.subtitle': 'Stock levels, materials, movements, purchase orders — or ask the agent to move stock or set alerts.',
+    'chat.placeholder': 'Ask about stock, materials, or request an operation…',
+    'chat.send': 'Send',
+    'chat.footnote': 'Write operations always require your confirmation before touching SAP.',
+    'chat.conversations': 'Conversations',
+    'chat.newChat': 'New chat',
+    'chat.working': 'Working on it',
+    'approvals.title': 'Pending approvals',
+    'approvals.awaiting': 'awaiting',
+    'approvals.empty.title': 'Nothing to approve',
+    'approvals.empty.hint': 'When the agent proposes a write to SAP, it appears here for your sign-off first.',
+    'approvals.approve': 'Approve',
+    'approvals.dismiss': 'Dismiss',
+    'approvals.requires': 'Requires confirmation',
+    'approvals.steps': 'operations in this workflow',
+    'alerts.title': 'Stock alerts',
+    'alerts.empty': 'No alerts yet. Try: "alert me when MAT-10023456 in warehouse 1010 drops below 100".',
+    'alerts.below': 'below',
+    'connected': 'Connected',
+    'export.csv': 'Export CSV',
+    'source.cache': 'Served from cache',
+    'source.live': 'Live from SAP',
+    'notif.title': 'Notifications',
+    'notif.empty': 'No notifications yet.',
+    'notif.markRead': 'Mark all read',
+    'users.invite': 'Invite a user',
+    'users.add': 'Add user',
+    'users.email': 'Work email',
+    'users.name': 'Display name',
+    'users.warehouseAccess': 'Warehouse access',
+    'users.adminAll': 'administrators access all warehouses',
+    'users.noScopes': 'No warehouses assigned — user cannot query any stock.',
+    'users.grant': 'Grant access',
+    'users.read': 'Read',
+    'users.write': 'Write',
+    'users.autoApprove': 'Auto-approve writes up to qty',
+    'users.autoApproveOff': 'Off — every write needs approval',
+    'usage.tokens': 'Tokens this month',
+    'usage.requests': 'Requests logged',
+    'usage.cacheRate': 'Cache hit rate',
+    'usage.latency': 'Avg. latency',
+    'usage.chartTitle': 'Token consumption per day',
+    'usage.byUser': 'Usage by user and day',
+    'logs.title': 'Request activity',
+    'logs.subtitle': 'Every agent request — updated in real time',
+    'logs.live': 'Live',
+  },
+  de: {
+    'nav.workspace': 'Arbeitsbereich',
+    'nav.assistant': 'Assistent',
+    'nav.usage': 'Verbrauch & Kosten',
+    'nav.activity': 'Aktivität',
+    'nav.access': 'Zugriffskontrolle',
+    'role.admin': 'Administrator',
+    'role.viewer': 'Bediener',
+    'page.chat.title': 'Assistent',
+    'page.chat.subtitle': 'Fragen zu Bestand, Materialien und Bewegungen — oder Lageroperationen ausführen.',
+    'page.usage.title': 'Verbrauch & Kosten',
+    'page.usage.subtitle': 'Token-Verbrauch, Budgets und Effizienz auf einen Blick.',
+    'page.logs.title': 'Aktivität',
+    'page.logs.subtitle': 'Ein Live-Prüfprotokoll jeder Anfrage an den Agenten.',
+    'page.users.title': 'Zugriffskontrolle',
+    'page.users.subtitle': 'Wer welches Lager sehen und bedienen darf — und mit welchem Budget.',
+    'chat.empty.title': 'Fragen Sie alles über Ihre Lager',
+    'chat.empty.subtitle': 'Bestände, Materialien, Bewegungen, Bestellungen — oder lassen Sie den Agenten Bestand umbuchen und Alarme setzen.',
+    'chat.placeholder': 'Nach Bestand fragen oder eine Operation anfordern…',
+    'chat.send': 'Senden',
+    'chat.footnote': 'Schreiboperationen erfordern immer Ihre Bestätigung, bevor SAP berührt wird.',
+    'chat.conversations': 'Unterhaltungen',
+    'chat.newChat': 'Neuer Chat',
+    'chat.working': 'Einen Moment',
+    'approvals.title': 'Offene Freigaben',
+    'approvals.awaiting': 'offen',
+    'approvals.empty.title': 'Nichts freizugeben',
+    'approvals.empty.hint': 'Wenn der Agent eine Schreiboperation vorschlägt, erscheint sie hier zuerst zur Freigabe.',
+    'approvals.approve': 'Freigeben',
+    'approvals.dismiss': 'Verwerfen',
+    'approvals.requires': 'Bestätigung erforderlich',
+    'approvals.steps': 'Operationen in diesem Workflow',
+    'alerts.title': 'Bestandsalarme',
+    'alerts.empty': 'Noch keine Alarme. Beispiel: „Benachrichtige mich, wenn MAT-10023456 in Lager 1010 unter 100 fällt".',
+    'alerts.below': 'unter',
+    'connected': 'Verbunden',
+    'export.csv': 'CSV exportieren',
+    'source.cache': 'Aus dem Cache',
+    'source.live': 'Live aus SAP',
+    'notif.title': 'Benachrichtigungen',
+    'notif.empty': 'Noch keine Benachrichtigungen.',
+    'notif.markRead': 'Alle als gelesen markieren',
+    'users.invite': 'Benutzer einladen',
+    'users.add': 'Hinzufügen',
+    'users.email': 'E-Mail',
+    'users.name': 'Anzeigename',
+    'users.warehouseAccess': 'Lagerzugriff',
+    'users.adminAll': 'Administratoren haben Zugriff auf alle Lager',
+    'users.noScopes': 'Keine Lager zugewiesen — Benutzer kann keinen Bestand abfragen.',
+    'users.grant': 'Zugriff gewähren',
+    'users.read': 'Lesen',
+    'users.write': 'Schreiben',
+    'users.autoApprove': 'Schreibvorgänge automatisch freigeben bis Menge',
+    'users.autoApproveOff': 'Aus — jede Schreiboperation braucht Freigabe',
+    'usage.tokens': 'Tokens diesen Monat',
+    'usage.requests': 'Protokollierte Anfragen',
+    'usage.cacheRate': 'Cache-Trefferquote',
+    'usage.latency': 'Ø Latenz',
+    'usage.chartTitle': 'Token-Verbrauch pro Tag',
+    'usage.byUser': 'Verbrauch nach Benutzer und Tag',
+    'logs.title': 'Anfrageaktivität',
+    'logs.subtitle': 'Jede Agentenanfrage — in Echtzeit aktualisiert',
+    'logs.live': 'Live',
+  },
+} as const;
+
+export type TranslationKey = keyof (typeof dict)['en'];
+
+const I18nContext = createContext<{
+  lang: Lang;
+  setLang: (l: Lang) => void;
+  t: (key: TranslationKey) => string;
+}>({ lang: 'en', setLang: () => undefined, t: (k) => k });
+
+export function I18nProvider({ children }: { children: ReactNode }) {
+  const [lang, setLangState] = useState<Lang>(() => (localStorage.getItem('fp-lang') as Lang) || 'en');
+
+  const value = useMemo(
+    () => ({
+      lang,
+      setLang: (l: Lang) => {
+        localStorage.setItem('fp-lang', l);
+        setLangState(l);
+      },
+      t: (key: TranslationKey) => dict[lang][key] ?? dict.en[key] ?? key,
+    }),
+    [lang],
+  );
+
+  return <I18nContext.Provider value={value}>{children}</I18nContext.Provider>;
+}
+
+export function useI18n() {
+  return useContext(I18nContext);
+}

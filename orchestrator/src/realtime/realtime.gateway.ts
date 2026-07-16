@@ -66,6 +66,10 @@ export class RealtimeGateway implements OnGatewayConnection {
     this.server.to(`user:${userId}`).emit('chat:pending_action', payload);
   }
 
+  emitNotification(userId: string, payload: unknown) {
+    this.server.to(`user:${userId}`).emit('notification:new', payload);
+  }
+
   emitSessionLog(payload: unknown) {
     const row = payload as { user_id: string };
     this.server.to(`user:${row.user_id}`).emit('session_log:new', payload);
