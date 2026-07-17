@@ -1,6 +1,7 @@
 import { Body, Controller, Delete, Get, Param, Post, UseGuards } from '@nestjs/common';
 import { z } from 'zod';
 import { AuthGuard, CurrentUser } from '../auth/auth.guard';
+import { AdminGuard } from '../auth/roles.guard';
 import type { AuthUser } from '../common/types';
 import { AlertsService } from './alerts.service';
 
@@ -39,5 +40,13 @@ export class AlertsController {
   @Post('/notifications/mark-read')
   markRead(@CurrentUser() user: AuthUser) {
     return this.alerts.markNotificationsRead(user.id);
+  }
+
+  /** Admin: trigger the shift-handover digest immediately (demo / testing). */
+  @Post('/admin/run-digest')
+  @UseGuards(AdminGuard)
+  async runDigest() {
+    await this.alerts.dailyDigest();
+    return { success: true };
   }
 }

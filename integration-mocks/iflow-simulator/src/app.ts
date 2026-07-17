@@ -189,6 +189,38 @@ export function createApp(state = new IflowState(), ledger = new WriteLedger()) 
     }
   });
 
+  app.get('/iflow/demand-trend', (req, res) => {
+    const warehouseId = String(req.query.warehouseId || '');
+    if (!warehouseId) {
+      return res.status(400).json(errorResponse('VALIDATION_ERROR', 'warehouseId is required'));
+    }
+    const days = Math.min(Number(req.query.days || 14), 90);
+    const records = sapLiveEnabled() ? ledger.getDemandTrend(warehouseId, days) : state.getDemandTrend(warehouseId, days);
+    return res.json({ records, dataSource: sapLiveEnabled() ? 'write-ledger' : 'simulator' });
+  });
+
+  app.get('/iflow/purchase-requisitions', (req, res) => {
+    const warehouseId = req.query.warehouseId ? String(req.query.warehouseId) : undefined;
+    const records = ledger.purchaseRequisitions.filter((pr) => !warehouseId || pr.warehouseId === warehouseId);
+    return res.json({ records, dataSource: 'write-ledger' });
+  });
+
+  app.post('/iflow/purchase-requisition', (req, res) => {
+    const parsed = z
+      .object({
+        materialId: z.string().min(1),
+        warehouseId: z.string().min(1),
+        qty: z.number().int().positive(),
+        note: z.string().optional(),
+      })
+      .safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json(errorResponse('VALIDATION_ERROR', parsed.error.message));
+    }
+    const pr = ledger.createPurchaseRequisition(parsed.data);
+    return res.json({ success: true, purchaseRequisition: pr, dataSource: 'write-ledger' });
+  });
+
   app.post('/iflow/move', async (req, res) => {
     const parsed = moveBodySchema.safeParse(req.body);
     if (!parsed.success) {

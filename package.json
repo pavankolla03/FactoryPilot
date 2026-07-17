@@ -16,6 +16,7 @@
     "dev": "concurrently -n shared,iflow,mcpinv,mcpops,orch,frontend,approuter \"npm run dev -w @manufacturing-agent/shared\" \"npm run dev -w @manufacturing-agent/iflow-simulator\" \"npm run dev -w @manufacturing-agent/mcp-inventory\" \"npm run dev -w @manufacturing-agent/mcp-warehouse-ops\" \"npm run dev -w @manufacturing-agent/orchestrator\" \"npm run dev -w @manufacturing-agent/frontend\" \"npm run dev -w @manufacturing-agent/approuter\"",
     "build": "npm run build --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
+    "eval": "node scripts/agent-eval.mjs",
     "lint": "npm run lint --workspaces --if-present",
     "format": "npm run format --workspaces --if-present"
   },

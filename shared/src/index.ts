@@ -70,6 +70,10 @@ export interface PendingAction {
   tool: string;
   params: Record<string, unknown>;
   humanSummary: string;
+  requestedBy?: string;
+  requestedById?: string;
+  makerChecker?: boolean;
+  anomaly?: { reason: string };
 }
 
 export interface ChatRequest {
@@ -82,6 +86,7 @@ export interface ChatResponse {
   messageId?: string;
   text: string;
   source: 'cache' | 'live';
+  grounded?: boolean;
   pendingAction?: PendingAction;
 }
 

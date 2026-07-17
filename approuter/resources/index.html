@@ -4,15 +4,22 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <meta name="theme-color" content="#0B1524" />
+    <script>
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => navigator.serviceWorker.register('/sw.js'));
+      }
+    </script>
     <link
       href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
       rel="stylesheet"
     />
     <title>FactoryPilot — AI Agent for SAP Manufacturing</title>
-    <script type="module" crossorigin src="/assets/index-D2vFlM8H.js"></script>
+    <script type="module" crossorigin src="/assets/index-CBE7lTPf.js"></script>
     <link rel="modulepreload" crossorigin href="/assets/charts-C2dOeYOM.js">
     <link rel="modulepreload" crossorigin href="/assets/realtime-SYmKJpIj.js">
-    <link rel="stylesheet" crossorigin href="/assets/index-DdOeOkHs.css">
+    <link rel="stylesheet" crossorigin href="/assets/index-BPIEa3vr.css">
   </head>
   <body>
     <div id="root"></div>

@@ -55,7 +55,10 @@ export class RealtimeGateway implements OnGatewayConnection {
     this.server.to(`user:${userId}`).emit('chat:token', payload);
   }
 
-  emitChatDone(userId: string, payload: { conversationId: string; messageId: string; source: 'cache' | 'live' }) {
+  emitChatDone(
+    userId: string,
+    payload: { conversationId: string; messageId: string; source: 'cache' | 'live'; grounded?: boolean },
+  ) {
     this.server.to(`user:${userId}`).emit('chat:done', payload);
   }
 
@@ -63,7 +66,8 @@ export class RealtimeGateway implements OnGatewayConnection {
     userId: string,
     payload: { actionId: string; tool: string; params: Record<string, unknown>; humanSummary: string },
   ) {
-    this.server.to(`user:${userId}`).emit('chat:pending_action', payload);
+    // Admins also see pending approvals (needed for maker-checker sign-off).
+    this.server.to(`user:${userId}`).to('admin').emit('chat:pending_action', payload);
   }
 
   emitNotification(userId: string, payload: unknown) {

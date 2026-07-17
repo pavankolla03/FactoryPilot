@@ -9,7 +9,15 @@ export type AdminUser = {
   role: 'admin' | 'viewer';
   monthly_token_limit: number;
   auto_approve_max_qty: number | null;
+  maker_checker: boolean;
+  webhook_url: string | null;
   scopes: Array<{ warehouse_id: string; access_level: 'read' | 'write' }>;
+};
+
+export type WarehousePolicy = {
+  warehouse_id: string;
+  auto_approve_max_qty: number | null;
+  maker_checker: boolean;
 };
 
 export function UsersPage({
@@ -19,6 +27,10 @@ export function UsersPage({
   onQuota,
   onScopes,
   onPolicy,
+  onMakerChecker,
+  onWebhook,
+  warehousePolicies,
+  onWarehousePolicy,
 }: {
   users: AdminUser[];
   onCreate: (u: { email: string; display_name: string; role: 'admin' | 'viewer' }) => Promise<void>;
@@ -26,6 +38,10 @@ export function UsersPage({
   onQuota: (id: string, limit: number) => Promise<void>;
   onScopes: (id: string, scopes: AdminUser['scopes']) => Promise<void>;
   onPolicy: (id: string, maxQty: number | null) => Promise<void>;
+  onMakerChecker: (id: string, enabled: boolean) => Promise<void>;
+  onWebhook: (id: string, url: string | null) => Promise<void>;
+  warehousePolicies: WarehousePolicy[];
+  onWarehousePolicy: (warehouseId: string, maxQty: number | null, makerChecker: boolean) => Promise<void>;
 }) {
   const { t } = useI18n();
   const [email, setEmail] = useState('');
@@ -59,6 +75,8 @@ export function UsersPage({
         </div>
       </section>
 
+      <WarehousePolicies policies={warehousePolicies} onSave={onWarehousePolicy} />
+
       {users.length === 0 ? (
         <div className="card">
           <EmptyState icon={paths.users} title="No users yet" />
@@ -66,7 +84,16 @@ export function UsersPage({
       ) : (
         <div className="space-y-4">
           {users.map((u) => (
-            <UserCard key={u.id} user={u} onDelete={onDelete} onQuota={onQuota} onScopes={onScopes} onPolicy={onPolicy} />
+            <UserCard
+              key={u.id}
+              user={u}
+              onDelete={onDelete}
+              onQuota={onQuota}
+              onScopes={onScopes}
+              onPolicy={onPolicy}
+              onMakerChecker={onMakerChecker}
+              onWebhook={onWebhook}
+            />
           ))}
         </div>
       )}
@@ -80,16 +107,21 @@ function UserCard({
   onQuota,
   onScopes,
   onPolicy,
+  onMakerChecker,
+  onWebhook,
 }: {
   user: AdminUser;
   onDelete: (id: string) => Promise<void>;
   onQuota: (id: string, limit: number) => Promise<void>;
   onScopes: (id: string, scopes: AdminUser['scopes']) => Promise<void>;
   onPolicy: (id: string, maxQty: number | null) => Promise<void>;
+  onMakerChecker: (id: string, enabled: boolean) => Promise<void>;
+  onWebhook: (id: string, url: string | null) => Promise<void>;
 }) {
   const { t } = useI18n();
   const [quota, setQuota] = useState(String(user.monthly_token_limit ?? 50000));
   const [policyQty, setPolicyQty] = useState(user.auto_approve_max_qty === null ? '' : String(user.auto_approve_max_qty));
+  const [webhook, setWebhook] = useState(user.webhook_url || '');
   const [warehouse, setWarehouse] = useState('');
   const [level, setLevel] = useState<'read' | 'write'>('read');
   const scopes = user.scopes || [];
@@ -160,6 +192,29 @@ function UserCard({
               ? t('users.autoApproveOff')
               : `≤ ${user.auto_approve_max_qty}`}
           </span>
+          <label className="ml-2 flex cursor-pointer items-center gap-1.5 text-[11px] font-medium text-fp-ink-2">
+            <input
+              type="checkbox"
+              checked={user.maker_checker}
+              onChange={(e) => void onMakerChecker(user.id, e.target.checked)}
+            />
+            Maker-checker (second approver required)
+          </label>
+        </div>
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <input
+            className="input !w-80 py-2 text-xs"
+            placeholder="Slack/Teams webhook URL for notifications (optional)"
+            value={webhook}
+            onChange={(e) => setWebhook(e.target.value)}
+          />
+          <button
+            className="btn-ghost px-3 py-2 text-xs"
+            onClick={() => void onWebhook(user.id, webhook.trim() || null)}
+          >
+            Save webhook
+          </button>
+          {user.webhook_url && <span className="chip bg-fp-good-soft text-fp-good">delivering</span>}
         </div>
       </div>
 
@@ -218,6 +273,71 @@ function UserCard({
           </>
         )}
       </div>
+    </section>
+  );
+}
+
+
+function WarehousePolicies({
+  policies,
+  onSave,
+}: {
+  policies: WarehousePolicy[];
+  onSave: (warehouseId: string, maxQty: number | null, makerChecker: boolean) => Promise<void>;
+}) {
+  const [warehouseId, setWarehouseId] = useState('');
+  const [maxQty, setMaxQty] = useState('');
+  const [makerChecker, setMakerChecker] = useState(false);
+
+  return (
+    <section className="card p-5">
+      <h3 className="mb-1 text-sm font-semibold text-fp-ink">Warehouse policies</h3>
+      <p className="mb-3 text-xs text-fp-ink-3">
+        Apply to every user operating that warehouse. The most restrictive of user and warehouse policy wins.
+      </p>
+
+      <div className="flex flex-wrap items-center gap-2">
+        <input
+          className="input !w-36 py-2 text-xs"
+          placeholder="Warehouse e.g. 1010"
+          value={warehouseId}
+          onChange={(e) => setWarehouseId(e.target.value)}
+        />
+        <input
+          className="input !w-36 py-2 text-xs"
+          placeholder="Auto-approve ≤ qty"
+          value={maxQty}
+          onChange={(e) => setMaxQty(e.target.value.replace(/[^0-9]/g, ''))}
+        />
+        <label className="flex cursor-pointer items-center gap-1.5 text-[11px] font-medium text-fp-ink-2">
+          <input type="checkbox" checked={makerChecker} onChange={(e) => setMakerChecker(e.target.checked)} />
+          Maker-checker
+        </label>
+        <button
+          className="btn-ghost px-3 py-2 text-xs"
+          disabled={!warehouseId.trim()}
+          onClick={async () => {
+            await onSave(warehouseId.trim(), maxQty === '' ? null : Number(maxQty), makerChecker);
+            setWarehouseId('');
+            setMaxQty('');
+            setMakerChecker(false);
+          }}
+        >
+          Save policy
+        </button>
+      </div>
+
+      {policies.length > 0 && (
+        <div className="mt-3 flex flex-wrap gap-2">
+          {policies.map((p) => (
+            <span key={p.warehouse_id} className="chip border border-fp-line bg-fp-surface text-fp-ink-2">
+              WH {p.warehouse_id}
+              {p.auto_approve_max_qty !== null && ` · auto ≤ ${p.auto_approve_max_qty}`}
+              {p.maker_checker && ' · maker-checker'}
+            </span>
+          ))}
+        </div>
+      )}
     </section>
   );
 }

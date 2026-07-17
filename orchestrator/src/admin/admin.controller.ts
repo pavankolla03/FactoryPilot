@@ -39,6 +39,8 @@ export class AdminController {
               u.created_at,
               COALESCE(q.monthly_token_limit, 50000) AS monthly_token_limit,
               p.auto_approve_max_qty,
+              COALESCE(p.maker_checker, false) AS maker_checker,
+              u.webhook_url,
               COALESCE(s.scopes, '[]'::json) AS scopes
        FROM users u
        LEFT JOIN user_quota q ON q.user_id = u.id
@@ -136,21 +138,67 @@ export class AdminController {
   @Patch('/:id/policy')
   async updatePolicy(@Param('id') id: string, @Body() body: unknown) {
     const parsed = z
-      .object({ auto_approve_max_qty: z.number().int().positive().nullable() })
+      .object({
+        auto_approve_max_qty: z.number().int().positive().nullable().optional(),
+        maker_checker: z.boolean().optional(),
+      })
       .parse(body);
 
-    if (parsed.auto_approve_max_qty === null) {
-      await this.db.query('DELETE FROM approval_policies WHERE user_id = $1', [id]);
-      return { user_id: id, auto_approve_max_qty: null };
-    }
+    await this.db.query(
+      `INSERT INTO approval_policies(user_id, auto_approve_max_qty, maker_checker)
+       VALUES($1, $2, COALESCE($3, false))
+       ON CONFLICT (user_id) DO UPDATE SET
+         auto_approve_max_qty = CASE WHEN $4 THEN $2 ELSE approval_policies.auto_approve_max_qty END,
+         maker_checker = COALESCE($3, approval_policies.maker_checker)`,
+      [
+        id,
+        parsed.auto_approve_max_qty ?? null,
+        parsed.maker_checker ?? null,
+        parsed.auto_approve_max_qty !== undefined,
+      ],
+    );
+
+    const row = await this.db.query('SELECT * FROM approval_policies WHERE user_id = $1', [id]);
+    return row.rows[0] ?? { user_id: id, auto_approve_max_qty: null, maker_checker: false };
+  }
+
+  @Patch('/:id/webhook')
+  async updateWebhook(@Param('id') id: string, @Body() body: unknown) {
+    const parsed = z.object({ webhook_url: z.string().url().nullable() }).parse(body);
+    await this.db.query('UPDATE users SET webhook_url = $1 WHERE id = $2', [parsed.webhook_url, id]);
+    return { user_id: id, webhook_url: parsed.webhook_url };
+  }
+
+  @Get('/warehouse-policies/list')
+  async listWarehousePolicies() {
+    const rows = await this.db.query('SELECT * FROM warehouse_policies ORDER BY warehouse_id');
+    return rows.rows;
+  }
+
+  @Patch('/warehouse-policies/:warehouseId')
+  async updateWarehousePolicy(@Param('warehouseId') warehouseId: string, @Body() body: unknown) {
+    const parsed = z
+      .object({
+        auto_approve_max_qty: z.number().int().positive().nullable().optional(),
+        maker_checker: z.boolean().optional(),
+      })
+      .parse(body);
 
     await this.db.query(
-      `INSERT INTO approval_policies(user_id, auto_approve_max_qty)
-       VALUES($1, $2)
-       ON CONFLICT (user_id) DO UPDATE SET auto_approve_max_qty = EXCLUDED.auto_approve_max_qty`,
-      [id, parsed.auto_approve_max_qty],
+      `INSERT INTO warehouse_policies(warehouse_id, auto_approve_max_qty, maker_checker)
+       VALUES($1, $2, COALESCE($3, false))
+       ON CONFLICT (warehouse_id) DO UPDATE SET
+         auto_approve_max_qty = CASE WHEN $4 THEN $2 ELSE warehouse_policies.auto_approve_max_qty END,
+         maker_checker = COALESCE($3, warehouse_policies.maker_checker)`,
+      [
+        warehouseId,
+        parsed.auto_approve_max_qty ?? null,
+        parsed.maker_checker ?? null,
+        parsed.auto_approve_max_qty !== undefined,
+      ],
     );
-    return { user_id: id, auto_approve_max_qty: parsed.auto_approve_max_qty };
+    const row = await this.db.query('SELECT * FROM warehouse_policies WHERE warehouse_id = $1', [warehouseId]);
+    return row.rows[0];
   }
 
   @Delete('/:id')

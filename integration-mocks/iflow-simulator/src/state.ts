@@ -78,6 +78,24 @@ export class IflowState {
       .sort((a, b) => a.quantity - b.quantity);
   }
 
+  getDemandTrend(warehouseId: string, days: number) {
+    const minTime = Date.now() - days * 24 * 60 * 60 * 1000;
+    const byDay = new Map<string, { moves: number; totalQty: number }>();
+    for (const m of this.movements) {
+      if (m.warehouseId !== warehouseId || new Date(m.timestamp).getTime() < minTime) {
+        continue;
+      }
+      const day = m.timestamp.slice(0, 10);
+      const entry = byDay.get(day) || { moves: 0, totalQty: 0 };
+      entry.moves += 1;
+      entry.totalQty += m.qty;
+      byDay.set(day, entry);
+    }
+    return [...byDay.entries()]
+      .map(([day, v]) => ({ day, ...v }))
+      .sort((a, b) => a.day.localeCompare(b.day));
+  }
+
   getPurchaseOrders(warehouseId?: string, status?: string): PurchaseOrder[] {
     return this.purchaseOrders.filter((po) => {
       if (warehouseId && po.warehouseId !== warehouseId) {

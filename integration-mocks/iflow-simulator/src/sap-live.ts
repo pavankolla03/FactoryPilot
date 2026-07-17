@@ -9,7 +9,54 @@ export function sapLiveEnabled(): boolean {
   return Boolean(process.env.SAP_API_KEY);
 }
 
+// Circuit breaker: after 5 consecutive failures the SAP path fails fast for
+// 60s instead of piling latency onto every request.
+const breaker = { failures: 0, openUntil: 0 };
+const BREAKER_THRESHOLD = 5;
+const BREAKER_COOLDOWN_MS = 60_000;
+
+// Simple semaphore so bursts don't hammer the sandbox (rate-limit friendly).
+const MAX_CONCURRENT = 4;
+let inFlight = 0;
+const waiters: Array<() => void> = [];
+
+async function acquire() {
+  if (inFlight < MAX_CONCURRENT) {
+    inFlight += 1;
+    return;
+  }
+  await new Promise<void>((resolve) => waiters.push(resolve));
+  inFlight += 1;
+}
+
+function release() {
+  inFlight -= 1;
+  waiters.shift()?.();
+}
+
 async function sapGet(path: string, params: Record<string, string>): Promise<unknown> {
+  if (Date.now() < breaker.openUntil) {
+    throw new Error('SAP circuit breaker is open (recent failures) — retrying automatically in under a minute');
+  }
+  await acquire();
+  try {
+    const result = await sapGetInner(path, params);
+    breaker.failures = 0;
+    return result;
+  } catch (error) {
+    breaker.failures += 1;
+    if (breaker.failures >= BREAKER_THRESHOLD) {
+      breaker.openUntil = Date.now() + BREAKER_COOLDOWN_MS;
+      breaker.failures = 0;
+      logger.warn('SAP circuit breaker opened for 60s');
+    }
+    throw error;
+  } finally {
+    release();
+  }
+}
+
+async function sapGetInner(path: string, params: Record<string, string>): Promise<unknown> {
   const url = new URL(`${SAP_BASE}${path}`);
   url.searchParams.set('$format', 'json');
   for (const [k, v] of Object.entries(params)) {

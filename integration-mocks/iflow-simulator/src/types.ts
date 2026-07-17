@@ -37,6 +37,16 @@ export interface PurchaseOrder {
   expectedDelivery: string;
 }
 
+export interface PurchaseRequisition {
+  prNumber: string;
+  materialId: string;
+  warehouseId: string;
+  qty: number;
+  note: string;
+  status: 'draft';
+  createdAt: string;
+}
+
 export interface ApiErrorShape {
   error: {
     code:

@@ -18,6 +18,19 @@ const PREFERRED_FREE_MODELS = [
 
 const COOLDOWN_MS = 10 * 60 * 1000;
 
+/** Smaller/faster free models used for simple lookups (cost/latency routing). */
+const DEFAULT_LIGHT_MODELS = ['nvidia/nemotron-nano-9b-v2:free', 'openai/gpt-oss-20b:free'];
+
+const COMPLEX_HINTS = /analy|compare|why|trend|summar|explain|report|handover|suggest|reorder|prepare|workflow|forecast/i;
+
+function isSimpleQuery(messages: { role: string; content: string }[]): boolean {
+  const lastUser = [...messages].reverse().find((m) => m.role === 'user');
+  if (!lastUser) {
+    return false;
+  }
+  return lastUser.content.length < 120 && !COMPLEX_HINTS.test(lastUser.content);
+}
+
 export class OpenRouterProvider implements ILLMProvider {
   private readonly logger = new Logger(OpenRouterProvider.name);
   private readonly client: OpenAI;
@@ -92,17 +105,27 @@ export class OpenRouterProvider implements ILLMProvider {
     }
   }
 
-  private candidates(): string[] {
+  private candidates(light: boolean): string[] {
     const now = Date.now();
-    const available = this.chain.filter((m) => (this.cooldownUntil.get(m) || 0) <= now);
-    return available.length > 0 ? available : this.chain;
+    let ordered = this.chain;
+
+    if (light) {
+      const lightModels = (process.env.OPENROUTER_LIGHT_MODELS || DEFAULT_LIGHT_MODELS.join(','))
+        .split(',')
+        .map((m) => m.trim())
+        .filter((m) => this.chain.includes(m));
+      ordered = [...lightModels, ...this.chain.filter((m) => !lightModels.includes(m))];
+    }
+
+    const available = ordered.filter((m) => (this.cooldownUntil.get(m) || 0) <= now);
+    return available.length > 0 ? available : ordered;
   }
 
-  private async withFallback<T>(fn: (model: string) => Promise<T>): Promise<T> {
+  private async withFallback<T>(light: boolean, fn: (model: string) => Promise<T>): Promise<T> {
     await this.ensureChain();
     let lastError: unknown = new Error('no OpenRouter models available');
 
-    for (const model of this.candidates().slice(0, 4)) {
+    for (const model of this.candidates(light).slice(0, 4)) {
       try {
         return await fn(model);
       } catch (error) {
@@ -117,7 +140,7 @@ export class OpenRouterProvider implements ILLMProvider {
   }
 
   async complete(messages: LlmChatMessage[], tools: LlmToolDefinition[]): Promise<LlmCompletionResult> {
-    return this.withFallback(async (model) => {
+    return this.withFallback(isSimpleQuery(messages), async (model) => {
       const response = await this.client.chat.completions.create({
         model,
         messages: toOpenAIMessages(messages),
@@ -153,6 +176,8 @@ export class OpenRouterProvider implements ILLMProvider {
     tools: LlmToolDefinition[],
     onTextDelta: (delta: string) => void,
   ): Promise<LlmCompletionResult> {
-    return this.withFallback((model) => streamOpenAICompletion(this.client, model, messages, tools, onTextDelta));
+    return this.withFallback(isSimpleQuery(messages), (model) =>
+      streamOpenAICompletion(this.client, model, messages, tools, onTextDelta),
+    );
   }
 }

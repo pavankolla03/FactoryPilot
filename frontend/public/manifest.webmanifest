@@ -1,0 +1,17 @@
+{
+  "name": "FactoryPilot — AI Agent for SAP Manufacturing",
+  "short_name": "FactoryPilot",
+  "description": "Talk to your SAP warehouse: stock, movements, alerts, approvals.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0B1524",
+  "theme_color": "#0B1524",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

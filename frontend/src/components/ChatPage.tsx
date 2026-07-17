@@ -9,6 +9,7 @@ export type ChatTurn = {
   role: 'user' | 'assistant';
   text: string;
   source?: 'cache' | 'live';
+  grounded?: boolean;
 };
 
 export type ConversationSummary = {
@@ -151,8 +152,14 @@ export function ChatPage({
                   <div className="min-w-0 flex-1">
                     <AssistantBody text={turn.text} />
                     {turn.source && (
-                      <div className="mt-2.5">
+                      <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
                         <SourceChip source={turn.source} />
+                        {turn.grounded === true && (
+                          <span className="chip bg-fp-good-soft text-fp-good">Grounded in tool data</span>
+                        )}
+                        {turn.grounded === false && (
+                          <span className="chip bg-fp-warn-soft text-fp-warn">No data source consulted</span>
+                        )}
                       </div>
                     )}
                   </div>
@@ -186,6 +193,7 @@ export function ChatPage({
                 onKeyDown={(e) => e.key === 'Enter' && onSend()}
                 placeholder={t('chat.placeholder')}
               />
+              <BarcodeButton onScan={(code) => onInput(`show stock for material ${code}`)} />
               <MicButton onTranscript={onInput} />
               <button
                 className="grid h-10 w-10 shrink-0 place-items-center rounded-2xl bg-fp-accent text-white transition hover:bg-fp-accent-dark disabled:opacity-40"
@@ -280,12 +288,32 @@ function ApprovalCard({
 
   return (
     <div className="overflow-hidden rounded-2xl border border-fp-line">
-      <div className="border-l-[3px] border-fp-accent bg-fp-accent-soft/40 px-4 py-3">
+      <div
+        className={`border-l-[3px] px-4 py-3 ${
+          action.anomaly ? 'border-fp-bad bg-fp-bad-soft/50' : 'border-fp-accent bg-fp-accent-soft/40'
+        }`}
+      >
         <div className="text-sm font-semibold text-fp-ink">
           {action.tool === 'batch' ? `${steps.length} ${t('approvals.steps')}` : prettyTool(action.tool)}
         </div>
-        <div className="mt-0.5 text-xs text-fp-ink-3">{t('approvals.requires')}</div>
+        <div className="mt-0.5 text-xs text-fp-ink-3">
+          {t('approvals.requires')}
+          {action.requestedBy ? ` · requested by ${action.requestedBy}` : ''}
+        </div>
       </div>
+
+      {action.anomaly && (
+        <div className="flex items-start gap-2 border-b border-fp-line bg-fp-bad-soft/40 px-4 py-2.5">
+          <Icon path={paths.shield} size={13} strokeWidth={2.2} />
+          <span className="text-xs font-medium text-fp-bad">Unusual: {action.anomaly.reason}</span>
+        </div>
+      )}
+
+      {action.makerChecker && (
+        <div className="border-b border-fp-line bg-fp-warn-soft/50 px-4 py-2 text-[11px] font-medium text-fp-warn">
+          Maker-checker policy: a different administrator must approve this.
+        </div>
+      )}
       <div className="space-y-3 px-4 py-3">
         {steps.map((step, i) => (
           <div key={i}>
@@ -315,6 +343,82 @@ function ApprovalCard({
         </button>
       </div>
     </div>
+  );
+}
+
+/** Camera barcode scanning (BarcodeDetector API — Chrome/Android). */
+function BarcodeButton({ onScan }: { onScan: (code: string) => void }) {
+  const [scanning, setScanning] = useState(false);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+
+  const Detector = (window as unknown as { BarcodeDetector?: new (opts?: unknown) => any }).BarcodeDetector;
+  if (!Detector) {
+    return null;
+  }
+
+  function stop() {
+    streamRef.current?.getTracks().forEach((t) => t.stop());
+    streamRef.current = null;
+    setScanning(false);
+  }
+
+  async function start() {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+      streamRef.current = stream;
+      setScanning(true);
+      requestAnimationFrame(async function tick() {
+        const video = videoRef.current;
+        if (!video || !streamRef.current) {
+          return;
+        }
+        if (!video.srcObject) {
+          video.srcObject = stream;
+          await video.play();
+        }
+        try {
+          const detector = new Detector!({ formats: ['qr_code', 'code_128', 'ean_13', 'code_39'] });
+          const codes = await detector.detect(video);
+          if (codes.length > 0) {
+            onScan(String(codes[0].rawValue));
+            stop();
+            return;
+          }
+        } catch {
+          /* keep scanning */
+        }
+        if (streamRef.current) {
+          requestAnimationFrame(tick);
+        }
+      });
+    } catch {
+      setScanning(false);
+    }
+  }
+
+  return (
+    <>
+      <button
+        className={`grid h-10 w-10 shrink-0 place-items-center rounded-2xl transition ${
+          scanning ? 'bg-fp-accent-soft text-fp-accent' : 'text-[#8A877C] hover:bg-[#EEEDE4] hover:text-[#1F1E1D]'
+        }`}
+        title="Scan a barcode"
+        onClick={() => (scanning ? stop() : void start())}
+      >
+        <Icon path={paths.db} size={16} strokeWidth={2} />
+      </button>
+      {scanning && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-black/70" onClick={stop}>
+          <div className="overflow-hidden rounded-2xl">
+            <video ref={videoRef} className="h-64 w-96 object-cover" muted playsInline />
+            <div className="bg-fp-navy px-4 py-2 text-center text-xs text-white">
+              Point the camera at a material barcode — tap anywhere to cancel
+            </div>
+          </div>
+        </div>
+      )}
+    </>
   );
 }
 

@@ -110,8 +110,17 @@ CREATE TABLE IF NOT EXISTS notifications (
 
 CREATE TABLE IF NOT EXISTS approval_policies (
   user_id UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
-  auto_approve_max_qty INT
+  auto_approve_max_qty INT,
+  maker_checker BOOLEAN NOT NULL DEFAULT false
 );
+
+CREATE TABLE IF NOT EXISTS warehouse_policies (
+  warehouse_id TEXT PRIMARY KEY,
+  auto_approve_max_qty INT,
+  maker_checker BOOLEAN NOT NULL DEFAULT false
+);
+
+ALTER TABLE users ADD COLUMN IF NOT EXISTS webhook_url TEXT;
 
 CREATE INDEX IF NOT EXISTS idx_stock_alerts_active ON stock_alerts (active);
 CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications (user_id, created_at);

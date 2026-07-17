@@ -8,7 +8,7 @@ import { Sidebar, type Tab } from './components/Sidebar';
 import { ChatPage, type ChatTurn, type ConversationSummary, type StockAlert } from './components/ChatPage';
 import { AnalyticsPage } from './components/AnalyticsPage';
 import { ActivityPage } from './components/ActivityPage';
-import { UsersPage, type AdminUser } from './components/UsersPage';
+import { UsersPage, type AdminUser, type WarehousePolicy } from './components/UsersPage';
 import { Icon, PageHeader, paths } from './components/ui';
 import { useI18n } from './i18n';
 
@@ -60,6 +60,7 @@ function App() {
   const [tokenRows, setTokenRows] = useState<any[]>([]);
   const [sessionLogs, setSessionLogs] = useState<SessionLogEntry[]>([]);
   const [users, setUsers] = useState<AdminUser[]>([]);
+  const [warehousePolicies, setWarehousePolicies] = useState<WarehousePolicy[]>([]);
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
   const [alerts, setAlerts] = useState<StockAlert[]>([]);
@@ -143,10 +144,13 @@ function App() {
       setStreamingText(streamingTextRef.current);
     });
 
-    socket.on('chat:done', (payload: { conversationId: string; source: 'cache' | 'live' }) => {
+    socket.on('chat:done', (payload: { conversationId: string; source: 'cache' | 'live'; grounded?: boolean }) => {
       const finalText = streamingTextRef.current;
       if (finalText) {
-        setChatTurns((prev) => [...prev, { role: 'assistant', text: finalText, source: payload.source }]);
+        setChatTurns((prev) => [
+          ...prev,
+          { role: 'assistant', text: finalText, source: payload.source, grounded: payload.grounded },
+        ]);
       }
       setStreaming(false);
       streamingTextRef.current = '';
@@ -259,6 +263,8 @@ function App() {
   async function refreshUsers() {
     const res = await client.get('/api/admin/users');
     setUsers(res.data);
+    const policies = await client.get('/api/admin/users/warehouse-policies/list');
+    setWarehousePolicies(policies.data);
   }
 
   async function loadConversations() {
@@ -484,6 +490,22 @@ function App() {
             }}
             onPolicy={async (id, maxQty) => {
               await client.patch(`/api/admin/users/${id}/policy`, { auto_approve_max_qty: maxQty });
+              await refreshUsers();
+            }}
+            onMakerChecker={async (id, enabled) => {
+              await client.patch(`/api/admin/users/${id}/policy`, { maker_checker: enabled });
+              await refreshUsers();
+            }}
+            onWebhook={async (id, url) => {
+              await client.patch(`/api/admin/users/${id}/webhook`, { webhook_url: url });
+              await refreshUsers();
+            }}
+            warehousePolicies={warehousePolicies}
+            onWarehousePolicy={async (warehouseId, maxQty, makerChecker) => {
+              await client.patch(`/api/admin/users/warehouse-policies/${warehouseId}`, {
+                auto_approve_max_qty: maxQty,
+                maker_checker: makerChecker,
+              });
               await refreshUsers();
             }}
           />

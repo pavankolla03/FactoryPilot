@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
-import type { MovementRecord, StockRecord } from './types';
+import type { MovementRecord, PurchaseRequisition, StockRecord } from './types';
 
 /**
  * The write ledger for live-SAP mode. SAP's public sandbox is read-only, so
@@ -12,19 +12,64 @@ import type { MovementRecord, StockRecord } from './types';
 export class WriteLedger {
   private readonly file: string;
   movements: MovementRecord[] = [];
+  purchaseRequisitions: PurchaseRequisition[] = [];
 
   constructor(dataDir = process.env.LEDGER_DIR || path.join(process.cwd(), 'data')) {
     fs.mkdirSync(dataDir, { recursive: true });
     this.file = path.join(dataDir, 'ledger.json');
     try {
-      this.movements = JSON.parse(fs.readFileSync(this.file, 'utf8')) as MovementRecord[];
+      const parsed = JSON.parse(fs.readFileSync(this.file, 'utf8')) as
+        | MovementRecord[]
+        | { movements?: MovementRecord[]; purchaseRequisitions?: PurchaseRequisition[] };
+      if (Array.isArray(parsed)) {
+        this.movements = parsed;
+      } else {
+        this.movements = parsed.movements || [];
+        this.purchaseRequisitions = parsed.purchaseRequisitions || [];
+      }
     } catch {
       this.movements = [];
     }
   }
 
   private save() {
-    fs.writeFileSync(this.file, JSON.stringify(this.movements, null, 2));
+    fs.writeFileSync(
+      this.file,
+      JSON.stringify({ movements: this.movements, purchaseRequisitions: this.purchaseRequisitions }, null, 2),
+    );
+  }
+
+  createPurchaseRequisition(args: { materialId: string; warehouseId: string; qty: number; note?: string }) {
+    const pr: PurchaseRequisition = {
+      prNumber: `PR-${String(Math.floor(Math.random() * 900000) + 100000)}`,
+      materialId: args.materialId,
+      warehouseId: args.warehouseId,
+      qty: args.qty,
+      note: args.note || '',
+      status: 'draft',
+      createdAt: new Date().toISOString(),
+    };
+    this.purchaseRequisitions.unshift(pr);
+    this.save();
+    return pr;
+  }
+
+  getDemandTrend(warehouseId: string, days: number) {
+    const minTime = Date.now() - days * 24 * 60 * 60 * 1000;
+    const byDay = new Map<string, { moves: number; totalQty: number }>();
+    for (const m of this.movements) {
+      if (m.warehouseId !== warehouseId || new Date(m.timestamp).getTime() < minTime) {
+        continue;
+      }
+      const day = m.timestamp.slice(0, 10);
+      const entry = byDay.get(day) || { moves: 0, totalQty: 0 };
+      entry.moves += 1;
+      entry.totalQty += m.qty;
+      byDay.set(day, entry);
+    }
+    return [...byDay.entries()]
+      .map(([day, v]) => ({ day, ...v }))
+      .sort((a, b) => a.day.localeCompare(b.day));
   }
 
   /** Applies all ledger movements as deltas onto live stock records. */

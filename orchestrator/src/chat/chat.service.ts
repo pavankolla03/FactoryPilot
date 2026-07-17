@@ -13,7 +13,7 @@ import { RedisService } from '../common/redis.service';
 import { AlertsService } from '../alerts/alerts.service';
 import type { NormalizedToolCall } from '../llm/types';
 
-const WRITE_TOOLS = new Set(['moveStock']);
+const WRITE_TOOLS = new Set(['moveStock', 'draftPurchaseRequisition']);
 
 // Tools served by the orchestrator itself (user-scoped state), not by an MCP server.
 const LOCAL_TOOLS = [
@@ -35,6 +35,29 @@ const LOCAL_TOOLS = [
     name: 'listStockAlerts',
     description: "List the current user's active stock alerts.",
     inputSchema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'suggestReorders',
+    description:
+      'Analyze a warehouse and suggest reorder quantities: combines low-stock positions with inbound purchase orders and proposes how much to order. Use when the user asks what to reorder, replenish, or restock.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        warehouseId: { type: 'string' },
+        threshold: { type: 'number' },
+      },
+      required: ['warehouseId'],
+    },
+  },
+  {
+    name: 'getShiftHandover',
+    description:
+      'Build a shift-handover summary for a warehouse: movements in the last 24h, current low-stock positions, and triggered alerts. Use when the user asks for a handover, daily summary, or what happened today.',
+    inputSchema: {
+      type: 'object',
+      properties: { warehouseId: { type: 'string' } },
+      required: ['warehouseId'],
+    },
   },
 ];
 
@@ -78,6 +101,34 @@ export class ChatService {
 
     const convId = conversationId || (await this.createConversation(user.id, message));
     await this.insertMessage(convId, 'user', message);
+
+    // Query dedupe: identical (normalized) read questions from the same user
+    // within the TTL replay the cached answer without spending tokens.
+    const dedupeKey = `answer:${user.id}:${this.sortedHash({ q: this.normalizeQuery(message) })}`;
+    const cachedAnswer = await this.redis.raw.get(dedupeKey);
+    if (cachedAnswer) {
+      const cached = JSON.parse(cachedAnswer) as { text: string; grounded: boolean };
+      await this.insertMessage(convId, 'assistant', cached.text);
+      const msgId = randomUUID();
+      this.realtime.emitChatToken(user.id, { conversationId: convId, delta: cached.text });
+      this.realtime.emitChatDone(user.id, {
+        conversationId: convId,
+        messageId: msgId,
+        source: 'cache',
+        grounded: cached.grounded,
+      });
+      await this.writeSessionLog({
+        userId: user.id,
+        conversationId: convId,
+        queryText: message,
+        toolsInvoked: [],
+        cacheStatus: 'hit',
+        tokensUsed: 0,
+        status: 'success',
+        latencyMs: Date.now() - start,
+      });
+      return { conversationId: convId, messageId: msgId, text: cached.text, source: 'cache', grounded: cached.grounded };
+    }
 
     const tools = [...this.mcp.listTools(), ...LOCAL_TOOLS];
     const systemPrompt =
@@ -175,23 +226,44 @@ export class ChatService {
           }
 
           if (writeCalls.length > 0) {
-            const autoMax = await this.getAutoApproveMaxQty(user.id);
+            const warehouseIds = [...new Set(writeCalls.map((c) => String(c.arguments.warehouseId || '')))].filter(
+              Boolean,
+            );
+            const policy = await this.resolveWritePolicy(user.id, warehouseIds);
+
+            let anomaly: { reason: string } | null = null;
+            for (const call of writeCalls) {
+              if (call.name === 'moveStock') {
+                anomaly = await this.analyzeMoveAnomaly(
+                  String(call.arguments.warehouseId || ''),
+                  Number(call.arguments.qty || 0),
+                );
+                if (anomaly) {
+                  break;
+                }
+              }
+            }
+
             const allAutoApprovable =
-              autoMax !== null &&
-              writeCalls.every((c) => Number.isFinite(Number(c.arguments.qty)) && Number(c.arguments.qty) <= autoMax);
+              !anomaly &&
+              !policy.makerChecker &&
+              policy.autoMax !== null &&
+              writeCalls.every(
+                (c) => Number.isFinite(Number(c.arguments.qty)) && Number(c.arguments.qty) <= (policy.autoMax as number),
+              );
 
             if (allAutoApprovable) {
               // Policy allows executing these writes without human sign-off.
               for (const call of writeCalls) {
                 const result = await this.executeWriteTool(call.name, call.arguments);
-                const toolContent = JSON.stringify({ ...result, autoApproved: true, policyMaxQty: autoMax });
+                const toolContent = JSON.stringify({ ...result, autoApproved: true, policyMaxQty: policy.autoMax });
                 llmMessages.push({ role: 'tool', name: call.name, toolCallId: call.id, content: toolContent });
                 await this.insertMessage(convId, 'tool', toolContent, { toolCallId: call.id, name: call.name });
               }
               continue;
             }
 
-            const action: PendingAction =
+            const base: PendingAction =
               writeCalls.length === 1
                 ? {
                     actionId: randomUUID(),
@@ -209,6 +281,14 @@ export class ChatService {
                       .map((c) => c.name)
                       .join(', ')}`,
                   };
+
+            const action: PendingAction = {
+              ...base,
+              requestedBy: user.displayName,
+              requestedById: user.id,
+              makerChecker: policy.makerChecker,
+              ...(anomaly ? { anomaly } : {}),
+            };
 
             await this.redis.raw.setEx(
               `pending:action:${action.actionId}`,
@@ -273,11 +353,17 @@ export class ChatService {
 
     await this.insertMessage(convId, 'assistant', finalText);
     const messageId = randomUUID();
+    const grounded = invokedTools.length > 0;
     if (streamedChars === 0) {
       // Non-streaming provider: emit the full text as a single chunk.
       this.realtime.emitChatToken(user.id, { conversationId: convId, delta: finalText });
     }
-    this.realtime.emitChatDone(user.id, { conversationId: convId, messageId, source });
+    this.realtime.emitChatDone(user.id, { conversationId: convId, messageId, source, grounded });
+
+    if (grounded && finalText) {
+      const ttl = Number(process.env.ANSWER_DEDUPE_TTL_SECONDS || 600);
+      await this.redis.raw.setEx(dedupeKey, ttl, JSON.stringify({ text: finalText, grounded }));
+    }
 
     await this.writeSessionLog({
       userId: user.id,
@@ -295,7 +381,12 @@ export class ChatService {
       messageId,
       text: finalText,
       source,
+      grounded,
     };
+  }
+
+  private normalizeQuery(message: string) {
+    return message.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
   }
 
   async confirmAction(user: AuthUser, actionId: string) {
@@ -305,8 +396,21 @@ export class ChatService {
     }
 
     const payload = JSON.parse(raw) as { userId: string; action: PendingAction };
-    if (payload.userId !== user.id) {
+
+    // Admins may approve other users' pending actions (they act as checkers).
+    if (payload.userId !== user.id && user.role !== 'admin') {
       actionExpired();
+    }
+
+    // Maker-checker: the requester cannot approve their own action. Restore the
+    // pending entry so a second approver can still act on it.
+    if (payload.action.makerChecker && payload.userId === user.id) {
+      await this.redis.raw.setEx(`pending:action:${actionId}`, 900, raw);
+      throwApiError(
+        403,
+        'SCOPE_DENIED',
+        'This action requires a second approver (maker-checker policy). Another administrator must approve it.',
+      );
     }
 
     const steps: Array<{ tool: string; params: Record<string, unknown> }> =
@@ -418,16 +522,128 @@ export class ChatService {
       };
     }
 
+    if (name === 'suggestReorders') {
+      const warehouseId = String(args.warehouseId || '');
+      const threshold = Number(args.threshold || 50);
+      const [lowStock, pos] = await Promise.all([
+        this.mcp.callTool('getLowStock', { warehouseId, threshold }),
+        this.mcp.callTool('getPurchaseOrders', { warehouseId }),
+      ]);
+
+      const lowRecords = ((lowStock.structuredContent as { records?: Array<Record<string, unknown>> })?.records ||
+        []) as Array<Record<string, unknown>>;
+      const poRecords = ((pos.structuredContent as { records?: Array<Record<string, unknown>> })?.records ||
+        []) as Array<Record<string, unknown>>;
+
+      const suggestions = lowRecords.map((r) => {
+        const materialId = String(r.materialId);
+        const currentQty = Number(r.quantity || 0);
+        const inbound = poRecords
+          .filter((po) => po.materialId === materialId && po.status !== 'delivered')
+          .reduce((sum, po) => sum + Number(po.qty || 0), 0);
+        const target = threshold * 2;
+        const suggestedQty = Math.max(target - currentQty - inbound, 0);
+        return {
+          materialId,
+          location: r.location,
+          currentQty,
+          inboundQty: inbound,
+          targetLevel: target,
+          suggestedOrderQty: suggestedQty,
+          action: suggestedQty > 0 ? 'reorder recommended' : 'covered by inbound orders',
+        };
+      });
+
+      return {
+        structuredContent: {
+          warehouseId,
+          records: suggestions,
+          note: 'Use draftPurchaseRequisition to create a draft order for any suggestion the user accepts.',
+        },
+      };
+    }
+
+    if (name === 'getShiftHandover') {
+      const warehouseId = String(args.warehouseId || '');
+      const [movements, lowStock] = await Promise.all([
+        this.mcp.callTool('getRecentMovements', { warehouseId, sinceHours: 24 }),
+        this.mcp.callTool('getLowStock', { warehouseId, threshold: 50 }),
+      ]);
+      const triggeredAlerts = (await this.alerts.listAlerts(user.id)).filter(
+        (a) => a.warehouse_id === warehouseId && a.triggered,
+      );
+
+      return {
+        structuredContent: {
+          warehouseId,
+          generatedAt: new Date().toISOString(),
+          movementsLast24h:
+            (movements.structuredContent as { records?: unknown[] })?.records ?? [],
+          lowStockPositions: (lowStock.structuredContent as { records?: unknown[] })?.records ?? [],
+          triggeredAlerts: triggeredAlerts.map((a) => ({
+            materialId: a.material_id,
+            threshold: a.threshold,
+          })),
+        },
+      };
+    }
+
     validationError(`Unknown local tool: ${name}`);
   }
 
-  private async getAutoApproveMaxQty(userId: string): Promise<number | null> {
-    const row = await this.db.query<{ auto_approve_max_qty: number | null }>(
-      'SELECT auto_approve_max_qty FROM approval_policies WHERE user_id = $1',
+  /**
+   * Flags a stock move as anomalous when its quantity is far above the recent
+   * average for that warehouse (5x, with at least 3 prior movements).
+   */
+  private async analyzeMoveAnomaly(warehouseId: string, qty: number): Promise<{ reason: string } | null> {
+    try {
+      const raw = await this.redis.raw.zRange(`cache:movements:${warehouseId}`, -30, -1);
+      const quantities = raw
+        .map((item: string) => {
+          const parsed = JSON.parse(item) as { qty?: number; movement?: { qty?: number } };
+          return Number(parsed.qty ?? parsed.movement?.qty ?? 0);
+        })
+        .filter((q: number) => q > 0);
+      if (quantities.length < 3) {
+        return null;
+      }
+      const avg = quantities.reduce((a: number, b: number) => a + b, 0) / quantities.length;
+      if (qty >= avg * 5) {
+        return {
+          reason: `Quantity ${qty} is ${(qty / avg).toFixed(1)}× the recent average of ${avg.toFixed(0)} for warehouse ${warehouseId}`,
+        };
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  }
+
+  /** Combines the requester's policy with warehouse policies: most restrictive wins. */
+  private async resolveWritePolicy(userId: string, warehouseIds: string[]) {
+    const userRow = await this.db.query<{ auto_approve_max_qty: number | null; maker_checker: boolean }>(
+      'SELECT auto_approve_max_qty, maker_checker FROM approval_policies WHERE user_id = $1',
       [userId],
     );
-    return row.rows[0]?.auto_approve_max_qty ?? null;
+    const whRows = warehouseIds.length
+      ? await this.db.query<{ auto_approve_max_qty: number | null; maker_checker: boolean }>(
+          'SELECT auto_approve_max_qty, maker_checker FROM warehouse_policies WHERE warehouse_id = ANY($1)',
+          [warehouseIds],
+        )
+      : { rows: [] as Array<{ auto_approve_max_qty: number | null; maker_checker: boolean }> };
+
+    const limits = [userRow.rows[0]?.auto_approve_max_qty, ...whRows.rows.map((r) => r.auto_approve_max_qty)].filter(
+      (v): v is number => v !== null && v !== undefined,
+    );
+    const makerChecker = Boolean(userRow.rows[0]?.maker_checker) || whRows.rows.some((r) => r.maker_checker);
+
+    return {
+      // Auto-approve only when the user policy grants it; warehouse policies can only tighten.
+      autoMax: userRow.rows[0]?.auto_approve_max_qty != null && limits.length ? Math.min(...limits) : null,
+      makerChecker,
+    };
   }
+
 
   private assertScope(user: AuthUser, warehouseId: string | undefined, need: 'read' | 'write' = 'read') {
     if (!warehouseId) {

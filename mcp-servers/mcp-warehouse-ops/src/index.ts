@@ -102,6 +102,48 @@ mcpServer.registerTool(
   },
 );
 
+  mcpServer.registerTool(
+    'draftPurchaseRequisition',
+    {
+      title: 'Draft a purchase requisition',
+      description:
+        'Creates a draft purchase requisition to reorder a material for a warehouse. A write operation requiring user approval. Use after suggesting reorders when the user agrees.',
+      inputSchema: {
+        materialId: z.string(),
+        warehouseId: z.string(),
+        qty: z.coerce.number().int().positive(),
+        note: z.string().optional(),
+      },
+    },
+    async (input) => {
+      const result = await iflowPost('/iflow/purchase-requisition', input);
+      return {
+        content: [{ type: 'text', text: JSON.stringify(result) }],
+        structuredContent: result,
+      };
+    },
+  );
+
+  mcpServer.registerTool(
+    'getDemandTrend',
+    {
+      title: 'Get movement/demand trend for a warehouse',
+      description:
+        'Returns daily movement counts and total quantities for the last N days (default 14) in a warehouse — a simple demand/throughput trend.',
+      inputSchema: {
+        warehouseId: z.string(),
+        days: z.coerce.number().int().positive().max(90).optional(),
+      },
+    },
+    async ({ warehouseId, days }) => {
+      const result = await iflowGet('/iflow/demand-trend', { warehouseId, days });
+      return {
+        content: [{ type: 'text', text: JSON.stringify(result) }],
+        structuredContent: result,
+      };
+    },
+  );
+
   return mcpServer;
 }
 
