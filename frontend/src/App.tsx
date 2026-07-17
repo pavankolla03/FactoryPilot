@@ -3,6 +3,8 @@ import axios from 'axios';
 import { io, Socket } from 'socket.io-client';
 import type { PendingAction, SessionLogEntry } from '@manufacturing-agent/shared';
 import { Landing } from './components/Landing';
+import { ApprovalsPage } from './components/ApprovalsPage';
+import { BoardPage } from './components/BoardPage';
 import { AuthPage } from './components/AuthPages';
 import { Sidebar, type Tab } from './components/Sidebar';
 import { ChatPage, type ChatTurn, type ConversationSummary, type StockAlert } from './components/ChatPage';
@@ -66,6 +68,27 @@ function App() {
   const [alerts, setAlerts] = useState<StockAlert[]>([]);
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [bellOpen, setBellOpen] = useState(false);
+  const bellRef = useRef<HTMLDivElement>(null);
+  const [toast, setToast] = useState('');
+
+  // Close the notifications popover on any click outside it.
+  useEffect(() => {
+    if (!bellOpen) {
+      return;
+    }
+    function onDocClick(event: MouseEvent) {
+      if (bellRef.current && !bellRef.current.contains(event.target as Node)) {
+        setBellOpen(false);
+      }
+    }
+    document.addEventListener('mousedown', onDocClick);
+    return () => document.removeEventListener('mousedown', onDocClick);
+  }, [bellOpen]);
+
+  function showToast(message: string) {
+    setToast(message);
+    window.setTimeout(() => setToast(''), 6000);
+  }
 
   const client = useMemo(() => {
     const instance = axios.create({ baseURL: API_BASE_URL || undefined });
@@ -334,6 +357,8 @@ function App() {
 
   const pageMeta: Record<Tab, { title: string; subtitle: string }> = {
     chat: { title: t('page.chat.title'), subtitle: t('page.chat.subtitle') },
+    board: { title: t('page.board.title'), subtitle: t('page.board.subtitle') },
+    approvals: { title: t('page.approvals.title'), subtitle: t('page.approvals.subtitle') },
     usage: { title: t('page.usage.title'), subtitle: t('page.usage.subtitle') },
     logs: { title: t('page.logs.title'), subtitle: t('page.logs.subtitle') },
     users: { title: t('page.users.title'), subtitle: t('page.users.subtitle') },
@@ -352,6 +377,7 @@ function App() {
         lang={lang}
         onLang={setLang}
         onLogout={logout}
+        pendingCount={pendingActions.length}
       />
 
       <main className="min-w-0 flex-1 p-6 md:p-8">
@@ -378,7 +404,7 @@ function App() {
                 </span>
               </span>
 
-              <div className="relative">
+              <div className="relative" ref={bellRef}>
                 <button
                   className="relative grid h-9 w-9 place-items-center rounded-full border border-fp-line bg-fp-surface text-fp-ink-2 transition hover:text-fp-ink"
                   onClick={() => setBellOpen((v) => !v)}
@@ -437,17 +463,24 @@ function App() {
             streaming={streaming}
             streamingText={streamingText}
             chatInput={chatInput}
-            pendingActions={pendingActions}
             conversations={conversations}
             activeConversationId={activeConversationId}
-            alerts={alerts}
             onInput={setChatInput}
             onSend={() => void sendChat()}
             onSuggestion={(s) => void sendChat(s)}
-            onConfirm={(id) => void confirmAction(id)}
-            onCancel={(id) => setPendingActions((prev) => prev.filter((x) => x.actionId !== id))}
             onOpenConversation={(id) => void openConversation(id)}
             onNewChat={newChat}
+          />
+        )}
+
+        {tab === 'board' && <BoardPage client={client} onProposed={showToast} />}
+
+        {tab === 'approvals' && (
+          <ApprovalsPage
+            pendingActions={pendingActions}
+            alerts={alerts}
+            onConfirm={(id) => void confirmAction(id)}
+            onCancel={(id) => setPendingActions((prev) => prev.filter((x) => x.actionId !== id))}
             onDeleteAlert={(id) => void deleteAlert(id)}
           />
         )}
@@ -509,6 +542,11 @@ function App() {
               await refreshUsers();
             }}
           />
+        )}
+        {toast && (
+          <div className="fixed bottom-6 right-6 z-50 max-w-sm rounded-2xl bg-fp-navy px-4 py-3 text-sm text-white shadow-pop">
+            {toast}
+          </div>
         )}
       </main>
     </div>

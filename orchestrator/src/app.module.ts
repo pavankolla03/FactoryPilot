@@ -9,6 +9,7 @@ import { ChatController } from './chat/chat.controller';
 import { ChatService } from './chat/chat.service';
 import { ConversationsController } from './chat/conversations.controller';
 import { LogsController } from './chat/logs.controller';
+import { OpsController } from './ops/ops.controller';
 import { DbService } from './common/db.service';
 import { RedisService } from './common/redis.service';
 import { LlmProviderFactory } from './llm/provider.factory';
@@ -18,7 +19,14 @@ import { RealtimeGateway } from './realtime/realtime.gateway';
 
 @Module({
   imports: [ConfigModule.forRoot({ isGlobal: true }), ScheduleModule.forRoot(), AuthModule],
-  controllers: [ChatController, AdminController, LogsController, ConversationsController, AlertsController],
+  controllers: [
+    ChatController,
+    AdminController,
+    LogsController,
+    ConversationsController,
+    AlertsController,
+    OpsController,
+  ],
   providers: [
     DbService,
     RedisService,

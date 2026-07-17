@@ -1,10 +1,12 @@
 import { Icon, LogoMark, initialsOf, paths } from './ui';
 import { useI18n, type Lang, type TranslationKey } from '../i18n';
 
-export type Tab = 'chat' | 'usage' | 'logs' | 'users';
+export type Tab = 'chat' | 'board' | 'approvals' | 'usage' | 'logs' | 'users';
 
 const NAV: Array<{ id: Tab; labelKey: TranslationKey; icon: string; adminOnly?: boolean }> = [
   { id: 'chat', labelKey: 'nav.assistant', icon: paths.chat },
+  { id: 'board', labelKey: 'nav.board', icon: paths.warehouse },
+  { id: 'approvals', labelKey: 'nav.approvals', icon: paths.shield },
   { id: 'usage', labelKey: 'nav.usage', icon: paths.chart },
   { id: 'logs', labelKey: 'nav.activity', icon: paths.logs },
   { id: 'users', labelKey: 'nav.access', icon: paths.users, adminOnly: true },
@@ -18,6 +20,7 @@ export function Sidebar({
   lang,
   onLang,
   onLogout,
+  pendingCount,
 }: {
   tab: Tab;
   role: 'admin' | 'viewer';
@@ -26,6 +29,7 @@ export function Sidebar({
   lang: Lang;
   onLang: (l: Lang) => void;
   onLogout: () => void;
+  pendingCount: number;
 }) {
   const { t } = useI18n();
 
@@ -46,7 +50,12 @@ export function Sidebar({
         {NAV.filter((n) => !n.adminOnly || role === 'admin').map((n) => (
           <button key={n.id} className={`nav-item ${tab === n.id ? 'active' : ''}`} onClick={() => onTab(n.id)}>
             <Icon path={n.icon} size={17} />
-            {t(n.labelKey)}
+            <span className="flex-1 text-left">{t(n.labelKey)}</span>
+            {n.id === 'approvals' && pendingCount > 0 && (
+              <span className="grid h-5 min-w-[20px] place-items-center rounded-full bg-fp-warn-soft px-1 text-[10px] font-bold text-fp-warn">
+                {pendingCount}
+              </span>
+            )}
           </button>
         ))}
       </nav>

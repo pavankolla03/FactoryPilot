@@ -1,8 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import type { PendingAction } from '@manufacturing-agent/shared';
-import { EmptyState, Icon, LogoMark, SourceChip, initialsOf, paths } from './ui';
+import { Icon, LogoMark, SourceChip, paths } from './ui';
 import { useI18n } from '../i18n';
 
 export type ChatTurn = {
@@ -43,46 +42,36 @@ export function ChatPage({
   streaming,
   streamingText,
   chatInput,
-  pendingActions,
   conversations,
   activeConversationId,
-  alerts,
   onInput,
   onSend,
   onSuggestion,
-  onConfirm,
-  onCancel,
   onOpenConversation,
   onNewChat,
-  onDeleteAlert,
 }: {
   displayName: string;
   chatTurns: ChatTurn[];
   streaming: boolean;
   streamingText: string;
   chatInput: string;
-  pendingActions: PendingAction[];
   conversations: ConversationSummary[];
   activeConversationId: string | null;
-  alerts: StockAlert[];
   onInput: (v: string) => void;
   onSend: () => void;
   onSuggestion: (v: string) => void;
-  onConfirm: (actionId: string) => void;
-  onCancel: (actionId: string) => void;
   onOpenConversation: (id: string) => void;
   onNewChat: () => void;
-  onDeleteAlert: (id: string) => void;
 }) {
   const { t } = useI18n();
   const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
-  }, [chatTurns.length, streamingText, pendingActions.length]);
+  }, [chatTurns.length, streamingText]);
 
   return (
-    <section className="grid items-start gap-5 xl:grid-cols-[240px_minmax(0,1fr)_320px]">
+    <section className="grid items-start gap-5 xl:grid-cols-[240px_minmax(0,1fr)]">
       <div className="card hidden max-h-[calc(100vh-190px)] flex-col overflow-hidden xl:flex">
         <div className="flex items-center justify-between border-b border-fp-line px-4 py-3">
           <span className="text-xs font-semibold uppercase tracking-wider text-fp-ink-3">
@@ -209,140 +198,7 @@ export function ChatPage({
         </div>
       </div>
 
-      <div className="space-y-5">
-        <div className="card p-5">
-          <div className="mb-3 flex items-center justify-between">
-            <h3 className="text-sm font-semibold text-fp-ink">{t('approvals.title')}</h3>
-            {pendingActions.length > 0 && (
-              <span className="chip bg-fp-warn-soft text-fp-warn">
-                {pendingActions.length} {t('approvals.awaiting')}
-              </span>
-            )}
-          </div>
-
-          {pendingActions.length === 0 ? (
-            <EmptyState icon={paths.shield} title={t('approvals.empty.title')} hint={t('approvals.empty.hint')} />
-          ) : (
-            <div className="space-y-3">
-              {pendingActions.map((action) => (
-                <ApprovalCard key={action.actionId} action={action} onConfirm={onConfirm} onCancel={onCancel} />
-              ))}
-            </div>
-          )}
-        </div>
-
-        <div className="card p-5">
-          <div className="mb-3 flex items-center justify-between">
-            <h3 className="text-sm font-semibold text-fp-ink">{t('alerts.title')}</h3>
-            {alerts.length > 0 && <span className="chip bg-fp-accent-soft text-fp-accent-dark">{alerts.length}</span>}
-          </div>
-
-          {alerts.length === 0 ? (
-            <p className="text-xs leading-relaxed text-fp-ink-3">{t('alerts.empty')}</p>
-          ) : (
-            <div className="space-y-2">
-              {alerts.map((a) => (
-                <div
-                  key={a.id}
-                  className="flex items-center justify-between gap-2 rounded-xl border border-fp-line px-3 py-2.5"
-                >
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-1.5 text-[13px] font-medium text-fp-ink">
-                      {a.triggered && <span className="h-2 w-2 shrink-0 rounded-full bg-fp-bad" />}
-                      <span className="truncate">{a.material_id}</span>
-                    </div>
-                    <div className="text-[11px] text-fp-ink-3">
-                      WH {a.warehouse_id} · {t('alerts.below')} {a.threshold}
-                    </div>
-                  </div>
-                  <button
-                    className="grid h-7 w-7 shrink-0 place-items-center rounded-lg text-fp-ink-3 transition hover:bg-fp-bad-soft hover:text-fp-bad"
-                    onClick={() => onDeleteAlert(a.id)}
-                  >
-                    <Icon path={paths.x} size={12} strokeWidth={2.4} />
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      </div>
     </section>
-  );
-}
-
-function ApprovalCard({
-  action,
-  onConfirm,
-  onCancel,
-}: {
-  action: PendingAction;
-  onConfirm: (id: string) => void;
-  onCancel: (id: string) => void;
-}) {
-  const { t } = useI18n();
-  const steps =
-    action.tool === 'batch'
-      ? ((action.params.steps || []) as Array<{ tool: string; params: Record<string, unknown> }>)
-      : [{ tool: action.tool, params: action.params }];
-
-  return (
-    <div className="overflow-hidden rounded-2xl border border-fp-line">
-      <div
-        className={`border-l-[3px] px-4 py-3 ${
-          action.anomaly ? 'border-fp-bad bg-fp-bad-soft/50' : 'border-fp-accent bg-fp-accent-soft/40'
-        }`}
-      >
-        <div className="text-sm font-semibold text-fp-ink">
-          {action.tool === 'batch' ? `${steps.length} ${t('approvals.steps')}` : prettyTool(action.tool)}
-        </div>
-        <div className="mt-0.5 text-xs text-fp-ink-3">
-          {t('approvals.requires')}
-          {action.requestedBy ? ` · requested by ${action.requestedBy}` : ''}
-        </div>
-      </div>
-
-      {action.anomaly && (
-        <div className="flex items-start gap-2 border-b border-fp-line bg-fp-bad-soft/40 px-4 py-2.5">
-          <Icon path={paths.shield} size={13} strokeWidth={2.2} />
-          <span className="text-xs font-medium text-fp-bad">Unusual: {action.anomaly.reason}</span>
-        </div>
-      )}
-
-      {action.makerChecker && (
-        <div className="border-b border-fp-line bg-fp-warn-soft/50 px-4 py-2 text-[11px] font-medium text-fp-warn">
-          Maker-checker policy: a different administrator must approve this.
-        </div>
-      )}
-      <div className="space-y-3 px-4 py-3">
-        {steps.map((step, i) => (
-          <div key={i}>
-            {steps.length > 1 && (
-              <div className="mb-1 text-[11px] font-semibold uppercase tracking-wider text-fp-ink-3">
-                {i + 1}. {prettyTool(step.tool)}
-              </div>
-            )}
-            <div className="space-y-1.5">
-              {Object.entries(step.params).map(([k, v]) => (
-                <div key={k} className="flex items-center justify-between gap-3 text-xs">
-                  <span className="text-fp-ink-3">{prettyKey(k)}</span>
-                  <span className="font-semibold text-fp-ink">{String(v)}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        ))}
-      </div>
-      <div className="flex gap-2 px-4 pb-4">
-        <button className="btn-primary flex-1 py-2 text-xs" onClick={() => onConfirm(action.actionId)}>
-          <Icon path={paths.check} size={13} strokeWidth={2.4} />
-          {t('approvals.approve')}
-        </button>
-        <button className="btn-ghost flex-1 py-2 text-xs" onClick={() => onCancel(action.actionId)}>
-          {t('approvals.dismiss')}
-        </button>
-      </div>
-    </div>
   );
 }
 

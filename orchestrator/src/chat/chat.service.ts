@@ -460,6 +460,85 @@ export class ChatService {
     return { success: true, actionId, result: steps.length === 1 ? results[0] : { steps: results } };
   }
 
+  /** Live stock for the kanban operations board (scope-checked, cached). */
+  async getWarehouseBoard(user: AuthUser, warehouseId: string) {
+    if (!warehouseId) {
+      validationError('warehouseId is required');
+    }
+    this.assertScope(user, warehouseId, 'read');
+
+    const { data, cacheHit } = await this.readToolWithCache('listWarehouseStock', { warehouseId });
+    const structured = (data as { structuredContent?: { records?: unknown[]; dataSource?: string } })
+      .structuredContent;
+    return {
+      warehouseId,
+      records: structured?.records ?? [],
+      dataSource: structured?.dataSource ?? 'simulator',
+      source: cacheHit ? 'cache' : 'live',
+    };
+  }
+
+  /**
+   * Board drag-and-drop move: same governance as chat writes — scope, anomaly
+   * detection, auto-approve policy, maker-checker, pending approval.
+   */
+  async proposeMove(
+    user: AuthUser,
+    params: { warehouseId: string; productId: string; fromLocation: string; toLocation: string; qty: number },
+  ) {
+    this.assertScope(user, params.warehouseId, 'write');
+
+    const policy = await this.resolveWritePolicy(user.id, [params.warehouseId]);
+    const anomaly = await this.analyzeMoveAnomaly(params.warehouseId, params.qty);
+    const args: Record<string, unknown> = { ...params };
+
+    if (!anomaly && !policy.makerChecker && policy.autoMax !== null && params.qty <= policy.autoMax) {
+      const result = await this.executeWriteTool('moveStock', args);
+      await this.writeSessionLog({
+        userId: user.id,
+        conversationId: null,
+        queryText: `board-move:${params.productId} ${params.fromLocation}→${params.toLocation} x${params.qty}`,
+        toolsInvoked: ['moveStock'],
+        cacheStatus: 'n/a',
+        tokensUsed: 0,
+        status: 'success',
+        latencyMs: 0,
+      });
+      return { executed: true, autoApproved: true, result };
+    }
+
+    const action: PendingAction = {
+      actionId: randomUUID(),
+      tool: 'moveStock',
+      params: args,
+      humanSummary: `Move ${params.qty} × ${params.productId} from ${params.fromLocation} to ${params.toLocation} in warehouse ${params.warehouseId} (from the operations board)`,
+      requestedBy: user.displayName,
+      requestedById: user.id,
+      makerChecker: policy.makerChecker,
+      ...(anomaly ? { anomaly } : {}),
+    };
+
+    await this.redis.raw.setEx(
+      `pending:action:${action.actionId}`,
+      900,
+      JSON.stringify({ userId: user.id, action }),
+    );
+    this.realtime.emitPendingAction(user.id, action);
+
+    await this.writeSessionLog({
+      userId: user.id,
+      conversationId: null,
+      queryText: `board-move:${params.productId} ${params.fromLocation}→${params.toLocation} x${params.qty}`,
+      toolsInvoked: ['moveStock'],
+      cacheStatus: 'n/a',
+      tokensUsed: 0,
+      status: 'success',
+      latencyMs: 0,
+    });
+
+    return { executed: false, pendingAction: action };
+  }
+
   /** Executes a write tool through MCP and maintains the caches it touches. */
   private async executeWriteTool(tool: string, params: Record<string, unknown>) {
     const result = await this.mcp.callTool(tool, params);
