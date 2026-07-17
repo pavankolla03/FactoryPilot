@@ -1,6 +1,26 @@
-# Manufacturing Agent Monorepo
+# FactoryPilot — AI Agent for SAP Manufacturing
 
 A full-stack, multi-service AI agentic application for SAP Manufacturing/Warehouse workflows.
+
+## Product features
+
+- **Agentic chat** over 15 tools (11 MCP + 4 orchestrator-local): stock, materials, search,
+  warehouse summaries, low stock, purchase orders, movements, demand trend, reorder suggestions,
+  shift handover, stock alerts, moves, and draft purchase requisitions.
+- **Governance**: write confirmation cards, per-user and per-warehouse auto-approve policies
+  (most restrictive wins), maker-checker second-approver enforcement, anomaly detection
+  (moves ≥5× the recent average are flagged and never auto-approved), full audit trail.
+- **Proactive monitoring**: chat-created stock alerts checked every minute against live stock,
+  a 06:00 shift-handover digest, in-app notifications plus Slack/Teams-compatible webhooks.
+- **Trust**: every answer carries a grounded/ungrounded flag, per-user chat rate limiting,
+  a circuit breaker + concurrency cap on the SAP path, and a 20-case agent regression suite
+  (`npm run eval`).
+- **Cost**: free OpenRouter tool-calling models with fallback chains and light/heavy routing,
+  Redis read caching with write invalidation, normalized-query answer dedupe at 0 tokens,
+  monthly token quotas per user.
+- **Live SAP option**: with `SAP_API_KEY` set, reads come from SAP Business Accelerator Hub
+  S/4HANA Cloud sandbox APIs; writes persist in a disk-backed ledger applied as deltas
+  (the public sandbox is read-only) — swapping to a real tenant is a credential change.
 
 ## Assumptions
 
