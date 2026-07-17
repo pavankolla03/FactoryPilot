@@ -34,7 +34,7 @@ export function Sidebar({
   const { t } = useI18n();
 
   return (
-    <aside className="flex w-full flex-col bg-fp-navy p-4 md:min-h-screen md:w-[248px]">
+    <aside className="flex w-full flex-col bg-fp-navy p-4 md:sticky md:top-0 md:h-screen md:w-[248px] md:overflow-y-auto">
       <div className="mb-8 flex items-center gap-3 px-1.5 pt-1.5">
         <LogoMark size={36} />
         <div>

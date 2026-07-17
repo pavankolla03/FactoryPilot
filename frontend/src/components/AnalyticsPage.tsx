@@ -63,11 +63,11 @@ export function AnalyticsPage({
             <span className="text-xs font-semibold uppercase tracking-wider text-fp-ink-3">{t('usage.tokens')}</span>
             <Icon path={paths.spark} size={16} strokeWidth={2} />
           </div>
-          <div className="mt-2 text-[26px] font-semibold tracking-tight text-fp-ink">
+          <div className={`mt-2 text-[26px] font-semibold tracking-tight ${TONE_TEXT[toneFor(pct, 50, 75)]}`}>
             {usage.used.toLocaleString()}
           </div>
           <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-fp-line">
-            <div className="h-full rounded-full bg-fp-accent" style={{ width: `${pct}%` }} />
+            <div className={`h-full rounded-full ${TONE_BAR[toneFor(pct, 50, 75)]}`} style={{ width: `${pct}%` }} />
           </div>
           <div className="mt-1.5 text-xs text-fp-ink-3">
             {pct}% of {usage.limit.toLocaleString()} budget
@@ -75,8 +75,20 @@ export function AnalyticsPage({
         </div>
 
         <StatTile icon={paths.chat} label={t('usage.requests')} value={stats.requests.toLocaleString()} note="last 500 shown" />
-        <StatTile icon={paths.db} label={t('usage.cacheRate')} value={`${stats.cacheRate}%`} note="of cacheable reads" />
-        <StatTile icon={paths.clock} label={t('usage.latency')} value={`${stats.avgLatency.toLocaleString()} ms`} note="per request" />
+        <StatTile
+          icon={paths.db}
+          label={t('usage.cacheRate')}
+          value={`${stats.cacheRate}%`}
+          note="of cacheable reads"
+          tone={toneFor(stats.cacheRate, 60, 30, true)}
+        />
+        <StatTile
+          icon={paths.clock}
+          label={t('usage.latency')}
+          value={`${stats.avgLatency.toLocaleString()} ms`}
+          note="per request"
+          tone={toneFor(stats.avgLatency, 2000, 5000)}
+        />
       </section>
 
       <section className="card p-6">
@@ -157,14 +169,54 @@ export function AnalyticsPage({
   );
 }
 
-function StatTile({ icon, label, value, note }: { icon: string; label: string; value: string; note: string }) {
+type Tone = 'good' | 'warn' | 'bad' | 'neutral';
+
+const TONE_TEXT: Record<Tone, string> = {
+  good: 'text-fp-good',
+  warn: 'text-fp-warn',
+  bad: 'text-fp-bad',
+  neutral: 'text-fp-ink',
+};
+
+const TONE_BAR: Record<Tone, string> = {
+  good: 'bg-fp-good',
+  warn: 'bg-[#EDA100]',
+  bad: 'bg-fp-bad',
+  neutral: 'bg-fp-accent',
+};
+
+/** Traffic-light tone: green below the first bound, amber between, red above. */
+function toneFor(value: number, warnAt: number, badAt: number, higherIsBetter = false): Tone {
+  if (higherIsBetter) {
+    if (value >= warnAt) return 'good';
+    if (value >= badAt) return 'warn';
+    return 'bad';
+  }
+  if (value < warnAt) return 'good';
+  if (value <= badAt) return 'warn';
+  return 'bad';
+}
+
+function StatTile({
+  icon,
+  label,
+  value,
+  note,
+  tone = 'neutral',
+}: {
+  icon: string;
+  label: string;
+  value: string;
+  note: string;
+  tone?: Tone;
+}) {
   return (
     <div className="card p-5">
       <div className="flex items-center justify-between text-fp-ink-3">
         <span className="text-xs font-semibold uppercase tracking-wider">{label}</span>
         <Icon path={icon} size={16} strokeWidth={2} />
       </div>
-      <div className="mt-2 text-[26px] font-semibold tracking-tight text-fp-ink">{value}</div>
+      <div className={`mt-2 text-[26px] font-semibold tracking-tight ${TONE_TEXT[tone]}`}>{value}</div>
       <div className="mt-1.5 text-xs text-fp-ink-3">{note}</div>
     </div>
   );

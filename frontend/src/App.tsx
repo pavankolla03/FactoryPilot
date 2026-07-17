@@ -90,6 +90,19 @@ function App() {
     window.setTimeout(() => setToast(''), 6000);
   }
 
+  /** Wraps an admin action with visible success/error feedback. */
+  async function withFeedback(action: () => Promise<void>, success: string) {
+    try {
+      await action();
+      showToast(success);
+    } catch (error) {
+      const detail = axios.isAxiosError(error)
+        ? error.response?.data?.error?.message || error.response?.data?.message || error.message
+        : 'something went wrong';
+      showToast(`Failed: ${detail}`);
+    }
+  }
+
   const client = useMemo(() => {
     const instance = axios.create({ baseURL: API_BASE_URL || undefined });
     instance.interceptors.request.use((config) => {
@@ -505,42 +518,58 @@ function App() {
         {tab === 'users' && role === 'admin' && (
           <UsersPage
             users={users}
-            onCreate={async (u) => {
-              await client.post('/api/admin/users', u);
-              await refreshUsers();
-            }}
-            onDelete={async (id) => {
-              await client.delete(`/api/admin/users/${id}`);
-              await refreshUsers();
-            }}
-            onQuota={async (id, limit) => {
-              await client.patch(`/api/admin/users/${id}/quota`, { monthly_token_limit: limit });
-              await refreshUsers();
-            }}
-            onScopes={async (id, scopes) => {
-              await client.patch(`/api/admin/users/${id}/scopes`, { scopes });
-              await refreshUsers();
-            }}
-            onPolicy={async (id, maxQty) => {
-              await client.patch(`/api/admin/users/${id}/policy`, { auto_approve_max_qty: maxQty });
-              await refreshUsers();
-            }}
-            onMakerChecker={async (id, enabled) => {
-              await client.patch(`/api/admin/users/${id}/policy`, { maker_checker: enabled });
-              await refreshUsers();
-            }}
-            onWebhook={async (id, url) => {
-              await client.patch(`/api/admin/users/${id}/webhook`, { webhook_url: url });
-              await refreshUsers();
-            }}
+            onCreate={(u) =>
+              withFeedback(async () => {
+                await client.post('/api/admin/users', u);
+                await refreshUsers();
+              }, `Invited ${u.email} — they activate by signing up with that email.`)
+            }
+            onDelete={(id) =>
+              withFeedback(async () => {
+                await client.delete(`/api/admin/users/${id}`);
+                await refreshUsers();
+              }, 'User removed.')
+            }
+            onQuota={(id, limit) =>
+              withFeedback(async () => {
+                await client.patch(`/api/admin/users/${id}/quota`, { monthly_token_limit: limit });
+                await refreshUsers();
+              }, 'Monthly token quota updated.')
+            }
+            onScopes={(id, scopes) =>
+              withFeedback(async () => {
+                await client.patch(`/api/admin/users/${id}/scopes`, { scopes });
+                await refreshUsers();
+              }, 'Warehouse access updated.')
+            }
+            onPolicy={(id, maxQty) =>
+              withFeedback(async () => {
+                await client.patch(`/api/admin/users/${id}/policy`, { auto_approve_max_qty: maxQty });
+                await refreshUsers();
+              }, 'Auto-approve policy saved.')
+            }
+            onMakerChecker={(id, enabled) =>
+              withFeedback(async () => {
+                await client.patch(`/api/admin/users/${id}/policy`, { maker_checker: enabled });
+                await refreshUsers();
+              }, enabled ? 'Maker-checker enabled.' : 'Maker-checker disabled.')
+            }
+            onWebhook={(id, url) =>
+              withFeedback(async () => {
+                await client.patch(`/api/admin/users/${id}/webhook`, { webhook_url: url });
+                await refreshUsers();
+              }, url ? 'Webhook saved — notifications will be delivered there.' : 'Webhook removed.')
+            }
             warehousePolicies={warehousePolicies}
-            onWarehousePolicy={async (warehouseId, maxQty, makerChecker) => {
-              await client.patch(`/api/admin/users/warehouse-policies/${warehouseId}`, {
-                auto_approve_max_qty: maxQty,
-                maker_checker: makerChecker,
-              });
-              await refreshUsers();
-            }}
+            onWarehousePolicy={(warehouseId, maxQty, makerChecker) =>
+              withFeedback(async () => {
+                await client.patch(`/api/admin/users/warehouse-policies/${warehouseId}`, {
+                  auto_approve_max_qty: maxQty,
+                  maker_checker: makerChecker,
+                });
+                await refreshUsers();
+              }, `Policy for warehouse ${warehouseId} saved.`)
+            }
           />
         )}
         {toast && (

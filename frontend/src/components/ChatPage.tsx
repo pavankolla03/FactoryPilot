@@ -139,6 +139,7 @@ export function ChatPage({
                     <LogoMark size={28} />
                   </div>
                   <div className="min-w-0 flex-1">
+                    <div className="mb-1 text-[12px] font-semibold tracking-wide text-[#8A877C]">Otto</div>
                     <AssistantBody text={turn.text} />
                     {turn.source && (
                       <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
@@ -162,9 +163,10 @@ export function ChatPage({
                   <LogoMark size={28} animate />
                 </div>
                 <div className="min-w-0 flex-1">
+                  <div className="mb-1 text-[12px] font-semibold tracking-wide text-[#8A877C]">Otto</div>
                   <div className="chat-serif whitespace-pre-wrap">
-                    {streamingText || t('chat.working')}
-                    <span className="stream-cursor" />
+                    {streamingText || <span className="italic text-[#8A877C]">{t('chat.working')}…</span>}
+                    {streamingText && <span className="stream-cursor" />}
                   </div>
                 </div>
               </div>

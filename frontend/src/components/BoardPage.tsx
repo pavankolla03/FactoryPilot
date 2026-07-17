@@ -11,6 +11,16 @@ type StockCard = {
 };
 
 const LOCATION_ORDER = ['receiving', 'inspection', 'bulk', 'packing', 'shipping'];
+
+/** Per-location accent colors (colorblind-safe categorical palette). */
+const LOCATION_COLORS: Record<string, { bar: string; text: string; soft: string }> = {
+  receiving: { bar: '#2A78D6', text: '#1E5EB0', soft: 'rgba(42,120,214,0.08)' },
+  inspection: { bar: '#4A3AA7', text: '#4A3AA7', soft: 'rgba(74,58,167,0.08)' },
+  bulk: { bar: '#B87A00', text: '#9A6B00', soft: 'rgba(237,161,0,0.10)' },
+  packing: { bar: '#1B7F3B', text: '#1B7F3B', soft: 'rgba(27,175,122,0.10)' },
+  shipping: { bar: '#D95926', text: '#C24E20', soft: 'rgba(235,104,52,0.09)' },
+};
+const DEFAULT_COLOR = { bar: '#8B99AD', text: '#47586E', soft: 'rgba(139,153,173,0.10)' };
 const WAREHOUSES = ['1010', '1020', '1030', '1040', '1050'];
 
 export function BoardPage({
@@ -123,13 +133,18 @@ export function BoardPage({
         {locations.map((location) => {
           const cards = records.filter((r) => r.location === location);
           const total = cards.reduce((sum, c) => sum + c.quantity, 0);
+          const color = LOCATION_COLORS[location.toLowerCase()] || DEFAULT_COLOR;
           return (
             <div
               key={location}
+              style={{
+                borderTop: `3px solid ${color.bar}`,
+                background: dropTarget === location && dragged && dragged.location !== location ? undefined : color.soft,
+              }}
               className={`flex min-h-[300px] flex-col rounded-2xl border p-3 transition ${
                 dropTarget === location && dragged && dragged.location !== location
                   ? 'border-fp-accent bg-fp-accent-soft/40'
-                  : 'border-fp-line bg-fp-bg'
+                  : 'border-fp-line'
               }`}
               onDragOver={(e) => {
                 e.preventDefault();
@@ -147,8 +162,16 @@ export function BoardPage({
               }}
             >
               <div className="mb-2 flex items-center justify-between px-1">
-                <span className="text-xs font-semibold uppercase tracking-wider text-fp-ink-2">{location}</span>
-                <span className="text-[11px] text-fp-ink-3">{total.toLocaleString()} u</span>
+                <span className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider" style={{ color: color.text }}>
+                  <span className="h-2 w-2 rounded-full" style={{ background: color.bar }} />
+                  {location}
+                </span>
+                <span
+                  className="rounded-full px-2 py-0.5 text-[11px] font-semibold"
+                  style={{ color: color.text, background: '#FFFFFF' }}
+                >
+                  {total.toLocaleString()} u
+                </span>
               </div>
 
               <div className="flex-1 space-y-2">

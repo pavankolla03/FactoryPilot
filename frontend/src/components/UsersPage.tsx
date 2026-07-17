@@ -11,6 +11,7 @@ export type AdminUser = {
   auto_approve_max_qty: number | null;
   maker_checker: boolean;
   webhook_url: string | null;
+  has_password: boolean;
   scopes: Array<{ warehouse_id: string; access_level: 'read' | 'write' }>;
 };
 
@@ -51,7 +52,10 @@ export function UsersPage({
   return (
     <div className="space-y-5">
       <section className="card p-5">
-        <h3 className="mb-3 text-sm font-semibold text-fp-ink">{t('users.invite')}</h3>
+        <h3 className="mb-1 text-sm font-semibold text-fp-ink">{t('users.invite')}</h3>
+        <p className="mb-3 text-xs text-fp-ink-3">
+          The invited person activates their account by signing up with this exact email on the landing page.
+        </p>
         <div className="grid gap-2.5 md:grid-cols-[1.4fr_1.2fr_1fr_auto]">
           <input className="input" placeholder="Work email" value={email} onChange={(e) => setEmail(e.target.value)} />
           <input className="input" placeholder="Display name" value={name} onChange={(e) => setName(e.target.value)} />
@@ -139,6 +143,11 @@ function UserCard({
               <span className={`chip ${user.role === 'admin' ? 'bg-fp-navy text-white' : 'bg-fp-bg text-fp-ink-2'}`}>
                 {user.role === 'admin' ? 'Administrator' : 'Operator'}
               </span>
+              {!user.has_password && (
+                <span className="chip bg-fp-warn-soft text-fp-warn" title="This user must sign up with this email to set a password and activate the account.">
+                  Invited — not yet activated
+                </span>
+              )}
             </div>
             <div className="text-xs text-fp-ink-3">{user.email}</div>
           </div>

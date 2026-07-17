@@ -41,6 +41,7 @@ export class AdminController {
               p.auto_approve_max_qty,
               COALESCE(p.maker_checker, false) AS maker_checker,
               u.webhook_url,
+              (u.password_hash IS NOT NULL) AS has_password,
               COALESCE(s.scopes, '[]'::json) AS scopes
        FROM users u
        LEFT JOIN user_quota q ON q.user_id = u.id
