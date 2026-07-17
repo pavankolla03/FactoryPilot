@@ -78,6 +78,86 @@ export class IflowState {
       .sort((a, b) => a.quantity - b.quantity);
   }
 
+  receivePurchaseOrder(poNumber: string) {
+    const po = this.purchaseOrders.find((p) => p.poNumber === poNumber);
+    if (!po) {
+      throw new Error(`PO_NOT_FOUND: purchase order ${poNumber} does not exist`);
+    }
+    if (po.status === 'delivered') {
+      throw new Error(`ALREADY_RECEIVED: purchase order ${poNumber} was already received`);
+    }
+
+    let record = this.stocks.find(
+      (s) => s.materialId === po.materialId && s.warehouseId === po.warehouseId && s.location === 'receiving',
+    );
+    if (!record) {
+      record = {
+        materialId: po.materialId,
+        productId: po.productId,
+        warehouseId: po.warehouseId,
+        location: 'receiving',
+        quantity: 0,
+      };
+      this.stocks.push(record);
+    }
+    record.quantity += po.qty;
+    po.status = 'delivered';
+
+    const movement: MovementRecord = {
+      movementId: `MOV-${randomUUID().slice(0, 8)}`,
+      productId: po.productId,
+      warehouseId: po.warehouseId,
+      fromLocation: 'inbound',
+      toLocation: 'receiving',
+      qty: po.qty,
+      timestamp: new Date().toISOString(),
+      status: 'confirmed',
+    };
+    this.movements.unshift(movement);
+
+    return { purchaseOrder: po, movement, newReceivingQty: record.quantity };
+  }
+
+  adjustStock(args: { productId: string; warehouseId: string; location: string; targetQty: number }) {
+    let record = this.stocks.find(
+      (s) =>
+        (s.productId === args.productId || s.materialId === args.productId) &&
+        s.warehouseId === args.warehouseId &&
+        s.location.toLowerCase() === args.location.toLowerCase(),
+    );
+    if (!record) {
+      const material = this.materials.find((m) => m.productId === args.productId || m.materialId === args.productId);
+      record = {
+        materialId: material?.materialId || args.productId,
+        productId: material?.productId || args.productId,
+        warehouseId: args.warehouseId,
+        location: args.location,
+        quantity: 0,
+      };
+      this.stocks.push(record);
+    }
+
+    const previousQty = record.quantity;
+    const delta = args.targetQty - previousQty;
+    record.quantity = args.targetQty;
+
+    const movement: MovementRecord = {
+      movementId: `MOV-${randomUUID().slice(0, 8)}`,
+      productId: record.productId,
+      warehouseId: args.warehouseId,
+      fromLocation: delta >= 0 ? 'cycle-count' : args.location,
+      toLocation: delta >= 0 ? args.location : 'cycle-count',
+      qty: Math.abs(delta),
+      timestamp: new Date().toISOString(),
+      status: 'confirmed',
+    };
+    if (delta !== 0) {
+      this.movements.unshift(movement);
+    }
+
+    return { previousQty, newQty: args.targetQty, delta, movement: delta !== 0 ? movement : null };
+  }
+
   getDemandTrend(warehouseId: string, days: number) {
     const minTime = Date.now() - days * 24 * 60 * 60 * 1000;
     const byDay = new Map<string, { moves: number; totalQty: number }>();

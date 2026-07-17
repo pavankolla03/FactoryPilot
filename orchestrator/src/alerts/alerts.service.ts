@@ -148,6 +148,108 @@ export class AlertsService {
     }
   }
 
+  async createSchedule(
+    userId: string,
+    args: { report: string; warehouseId: string | null; hour: number; dayOfWeek: number | null },
+  ) {
+    if (!['shift_handover', 'usage_summary'].includes(args.report)) {
+      validationError("report must be 'shift_handover' or 'usage_summary'");
+    }
+    if (!Number.isInteger(args.hour) || args.hour < 0 || args.hour > 23) {
+      validationError('hour must be 0-23');
+    }
+    if (args.dayOfWeek !== null && (!Number.isInteger(args.dayOfWeek) || args.dayOfWeek < 0 || args.dayOfWeek > 6)) {
+      validationError('dayOfWeek must be 0-6 (0 = Sunday)');
+    }
+
+    const row = await this.db.query(
+      `INSERT INTO scheduled_reports(user_id, report, warehouse_id, hour, day_of_week)
+       VALUES($1, $2, $3, $4, $5)
+       RETURNING *`,
+      [userId, args.report, args.warehouseId, args.hour, args.dayOfWeek],
+    );
+    return row.rows[0];
+  }
+
+  async listSchedules(userId: string) {
+    const rows = await this.db.query(
+      'SELECT * FROM scheduled_reports WHERE user_id = $1 AND active = true ORDER BY created_at DESC',
+      [userId],
+    );
+    return rows.rows;
+  }
+
+  async deleteSchedule(userId: string, scheduleId: string) {
+    await this.db.query('UPDATE scheduled_reports SET active = false WHERE id = $1 AND user_id = $2', [
+      scheduleId,
+      userId,
+    ]);
+    return { success: true };
+  }
+
+  /** Top of every hour: deliver any scheduled reports due now. */
+  @Cron('0 * * * *')
+  async runScheduledReports() {
+    const now = new Date();
+    const due = await this.db.query<{
+      id: string;
+      user_id: string;
+      report: string;
+      warehouse_id: string | null;
+    }>(
+      `SELECT id, user_id, report, warehouse_id
+       FROM scheduled_reports
+       WHERE active = true AND hour = $1 AND (day_of_week IS NULL OR day_of_week = $2)`,
+      [now.getHours(), now.getDay()],
+    );
+
+    for (const schedule of due.rows) {
+      try {
+        const { title, body } = await this.buildReport(schedule.user_id, schedule.report, schedule.warehouse_id);
+        await this.notify(schedule.user_id, title, body);
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : 'unknown error';
+        this.logger.warn(`Scheduled report ${schedule.id} failed: ${reason}`);
+      }
+    }
+  }
+
+  private async buildReport(userId: string, report: string, warehouseId: string | null) {
+    if (report === 'usage_summary') {
+      const rows = await this.db.query<{ total: number; requests: string }>(
+        `SELECT COALESCE(SUM(total_tokens), 0)::int AS total,
+                (SELECT COUNT(*) FROM session_logs WHERE user_id = $1 AND created_at >= NOW() - INTERVAL '7 days') AS requests
+         FROM token_usage
+         WHERE user_id = $1 AND occurred_at >= NOW() - INTERVAL '7 days'`,
+        [userId],
+      );
+      const stat = rows.rows[0];
+      return {
+        title: 'Weekly usage summary',
+        body: `Last 7 days: ${Number(stat?.total || 0).toLocaleString()} tokens across ${stat?.requests || 0} requests.`,
+      };
+    }
+
+    const warehouses = warehouseId
+      ? [warehouseId]
+      : (await this.warehousesFor(userId, 'admin')).slice(0, 3);
+    const lines: string[] = [];
+    for (const wh of warehouses) {
+      const movements = (await this.mcp.callTool('getRecentMovements', {
+        warehouseId: wh,
+        sinceHours: 24,
+      })) as { structuredContent?: { records?: unknown[] } };
+      const low = (await this.mcp.callTool('getLowStock', { warehouseId: wh, threshold: 50 })) as {
+        structuredContent?: { records?: unknown[] };
+      };
+      lines.push(
+        `WH ${wh}: ${movements.structuredContent?.records?.length ?? 0} movements in 24h, ` +
+          `${low.structuredContent?.records?.length ?? 0} low-stock positions`,
+      );
+    }
+    return { title: 'Scheduled shift handover', body: lines.join('\n') || 'No warehouse activity found.' };
+  }
+
   /** 06:00 daily shift-handover digest for every user with warehouse access. */
   @Cron('0 6 * * *')
   async dailyDigest() {

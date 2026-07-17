@@ -39,6 +39,8 @@ export function BoardPage({
   const [dropTarget, setDropTarget] = useState<string | null>(null);
   const [pendingDrop, setPendingDrop] = useState<{ card: StockCard; toLocation: string } | null>(null);
   const [qty, setQty] = useState('');
+  const [countCard, setCountCard] = useState<StockCard | null>(null);
+  const [countedQty, setCountedQty] = useState('');
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -98,6 +100,39 @@ export function BoardPage({
         (e as { response?: { data?: { error?: { message?: string } } } }).response?.data?.error?.message ||
         'move request failed';
       onProposed(`Move rejected: ${detail}`);
+    }
+  }
+
+  async function submitCount() {
+    if (!countCard) {
+      return;
+    }
+    const counted = Number(countedQty);
+    if (!Number.isInteger(counted) || counted < 0) {
+      return;
+    }
+    const card = countCard;
+    setCountCard(null);
+    if (counted === card.quantity) {
+      onProposed(`Count matches the system quantity (${counted}) — no adjustment needed.`);
+      return;
+    }
+    try {
+      await client.post('/api/ops/adjust-request', {
+        warehouseId,
+        productId: card.productId,
+        location: card.location,
+        countedQty: counted,
+        systemQty: card.quantity,
+      });
+      onProposed(
+        `Cycle-count adjustment for ${card.productId} (${card.quantity} → ${counted}) sent for approval.`,
+      );
+    } catch (e) {
+      const detail =
+        (e as { response?: { data?: { error?: { message?: string } } } }).response?.data?.error?.message ||
+        'adjustment request failed';
+      onProposed(`Adjustment rejected: ${detail}`);
     }
   }
 
@@ -191,7 +226,20 @@ export function BoardPage({
                     }}
                     className="cursor-grab rounded-xl border border-fp-line bg-fp-surface p-3 shadow-card transition hover:border-fp-accent active:cursor-grabbing"
                   >
-                    <div className="text-[13px] font-semibold text-fp-ink">{card.productId}</div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-[13px] font-semibold text-fp-ink">{card.productId}</span>
+                      <button
+                        className="rounded-lg px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-fp-ink-3 transition hover:bg-fp-accent-soft hover:text-fp-accent-dark"
+                        title="Cycle count: enter the physically counted quantity"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setCountCard(card);
+                          setCountedQty(String(card.quantity));
+                        }}
+                      >
+                        count
+                      </button>
+                    </div>
                     <div className="truncate text-[11px] text-fp-ink-3">{card.materialId}</div>
                     <div className="mt-2 flex items-center justify-between">
                       <span className="text-sm font-semibold tabular-nums text-fp-ink">
@@ -206,6 +254,37 @@ export function BoardPage({
           );
         })}
       </div>
+
+      {countCard && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-black/40" onClick={() => setCountCard(null)}>
+          <div className="w-80 rounded-2xl bg-fp-surface p-5 shadow-pop" onClick={(e) => e.stopPropagation()}>
+            <h4 className="text-sm font-semibold text-fp-ink">
+              Cycle count — {countCard.productId} @ {countCard.location}
+            </h4>
+            <p className="mt-1 text-xs text-fp-ink-3">
+              System shows <strong>{countCard.quantity.toLocaleString()}</strong> units. Enter the physically counted
+              quantity — discrepancies become an approval-gated adjustment.
+            </p>
+            <input
+              className="input mt-3"
+              type="number"
+              min={0}
+              value={countedQty}
+              onChange={(e) => setCountedQty(e.target.value)}
+              autoFocus
+              onKeyDown={(e) => e.key === 'Enter' && void submitCount()}
+            />
+            <div className="mt-3 flex gap-2">
+              <button className="btn-primary flex-1 py-2 text-xs" onClick={() => void submitCount()}>
+                Submit count
+              </button>
+              <button className="btn-ghost flex-1 py-2 text-xs" onClick={() => setCountCard(null)}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {pendingDrop && (
         <div className="fixed inset-0 z-50 grid place-items-center bg-black/40" onClick={() => setPendingDrop(null)}>

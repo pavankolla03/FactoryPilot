@@ -1,4 +1,4 @@
-import { Controller, Get, NotFoundException, Param, UseGuards } from '@nestjs/common';
+import { Controller, Get, NotFoundException, Param, Query, UseGuards } from '@nestjs/common';
 import { AuthGuard, CurrentUser } from '../auth/auth.guard';
 import type { AuthUser } from '../common/types';
 import { DbService } from '../common/db.service';
@@ -28,13 +28,31 @@ export class ConversationsController {
   }
 
   @Get('/:id/messages')
-  async messages(@CurrentUser() user: AuthUser, @Param('id') id: string) {
-    const owner = await this.db.query('SELECT id FROM conversations WHERE id = $1 AND user_id = $2', [
-      id,
-      user.id,
-    ]);
+  async messages(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Query('includeTools') includeTools?: string,
+  ) {
+    // Admins may inspect any conversation for audit drill-down.
+    const owner = await this.db.query(
+      user.role === 'admin'
+        ? 'SELECT id FROM conversations WHERE id = $1'
+        : 'SELECT id FROM conversations WHERE id = $1 AND user_id = $2',
+      user.role === 'admin' ? [id] : [id, user.id],
+    );
     if (!owner.rows[0]) {
       throw new NotFoundException({ error: { code: 'VALIDATION_ERROR', message: 'conversation not found' } });
+    }
+
+    if (includeTools === '1') {
+      const rows = await this.db.query(
+        `SELECT role, content, tool_calls_json, created_at
+         FROM conversation_messages
+         WHERE conversation_id = $1
+         ORDER BY created_at ASC`,
+        [id],
+      );
+      return rows.rows;
     }
 
     const rows = await this.db.query<{ role: string; content: string; created_at: string }>(

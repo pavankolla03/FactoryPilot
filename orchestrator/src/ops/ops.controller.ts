@@ -12,6 +12,14 @@ const moveRequestSchema = z.object({
   qty: z.number().int().positive(),
 });
 
+const adjustRequestSchema = z.object({
+  warehouseId: z.string().min(1),
+  productId: z.string().min(1),
+  location: z.string().min(1),
+  countedQty: z.number().int().min(0),
+  systemQty: z.number().int().min(0),
+});
+
 @Controller('/api/ops')
 @UseGuards(AuthGuard)
 export class OpsController {
@@ -31,5 +39,12 @@ export class OpsController {
   moveRequest(@CurrentUser() user: AuthUser, @Body() body: unknown) {
     const parsed = moveRequestSchema.parse(body);
     return this.chatService.proposeMove(user, parsed);
+  }
+
+  /** Cycle-count from the board: always approval-gated. */
+  @Post('/adjust-request')
+  adjustRequest(@CurrentUser() user: AuthUser, @Body() body: unknown) {
+    const parsed = adjustRequestSchema.parse(body);
+    return this.chatService.proposeAdjust(user, parsed);
   }
 }

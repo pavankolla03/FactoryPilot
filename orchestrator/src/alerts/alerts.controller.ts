@@ -42,6 +42,24 @@ export class AlertsController {
     return this.alerts.markNotificationsRead(user.id);
   }
 
+  @Get('/reports')
+  listReports(@CurrentUser() user: AuthUser) {
+    return this.alerts.listSchedules(user.id);
+  }
+
+  @Delete('/reports/:id')
+  removeReport(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.alerts.deleteSchedule(user.id, id);
+  }
+
+  /** Admin: run all scheduled reports due this hour immediately (demo / testing). */
+  @Post('/admin/run-scheduled-reports')
+  @UseGuards(AdminGuard)
+  async runScheduled() {
+    await this.alerts.runScheduledReports();
+    return { success: true };
+  }
+
   /** Admin: trigger the shift-handover digest immediately (demo / testing). */
   @Post('/admin/run-digest')
   @UseGuards(AdminGuard)

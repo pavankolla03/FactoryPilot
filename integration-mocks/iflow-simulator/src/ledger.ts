@@ -13,6 +13,7 @@ export class WriteLedger {
   private readonly file: string;
   movements: MovementRecord[] = [];
   purchaseRequisitions: PurchaseRequisition[] = [];
+  receivedPOs: string[] = [];
 
   constructor(dataDir = process.env.LEDGER_DIR || path.join(process.cwd(), 'data')) {
     fs.mkdirSync(dataDir, { recursive: true });
@@ -20,12 +21,13 @@ export class WriteLedger {
     try {
       const parsed = JSON.parse(fs.readFileSync(this.file, 'utf8')) as
         | MovementRecord[]
-        | { movements?: MovementRecord[]; purchaseRequisitions?: PurchaseRequisition[] };
+        | { movements?: MovementRecord[]; purchaseRequisitions?: PurchaseRequisition[]; receivedPOs?: string[] };
       if (Array.isArray(parsed)) {
         this.movements = parsed;
       } else {
         this.movements = parsed.movements || [];
         this.purchaseRequisitions = parsed.purchaseRequisitions || [];
+        this.receivedPOs = parsed.receivedPOs || [];
       }
     } catch {
       this.movements = [];
@@ -35,8 +37,68 @@ export class WriteLedger {
   private save() {
     fs.writeFileSync(
       this.file,
-      JSON.stringify({ movements: this.movements, purchaseRequisitions: this.purchaseRequisitions }, null, 2),
+      JSON.stringify(
+        {
+          movements: this.movements,
+          purchaseRequisitions: this.purchaseRequisitions,
+          receivedPOs: this.receivedPOs,
+        },
+        null,
+        2,
+      ),
     );
+  }
+
+  receivePurchaseOrder(po: { poNumber: string; productId: string; materialId: string; warehouseId: string; qty: number }) {
+    if (this.receivedPOs.includes(po.poNumber)) {
+      throw new Error(`ALREADY_RECEIVED: purchase order ${po.poNumber} was already received`);
+    }
+    const movement: MovementRecord = {
+      movementId: `MOV-${randomUUID().slice(0, 8)}`,
+      productId: po.productId || po.materialId,
+      warehouseId: po.warehouseId,
+      fromLocation: 'inbound',
+      toLocation: 'receiving',
+      qty: po.qty,
+      timestamp: new Date().toISOString(),
+      status: 'confirmed',
+    };
+    this.movements.unshift(movement);
+    this.receivedPOs.push(po.poNumber);
+    this.save();
+    return { purchaseOrder: { ...po, status: 'delivered' }, movement };
+  }
+
+  adjustStock(
+    liveRecords: StockRecord[],
+    args: { productId: string; warehouseId: string; location: string; targetQty: number },
+  ) {
+    const adjusted = this.applyDeltas(liveRecords);
+    const record = adjusted.find(
+      (r) =>
+        (r.productId === args.productId || r.materialId === args.productId) &&
+        r.warehouseId === args.warehouseId &&
+        r.location.toLowerCase() === args.location.toLowerCase(),
+    );
+    const previousQty = record?.quantity ?? 0;
+    const delta = args.targetQty - previousQty;
+
+    const movement: MovementRecord = {
+      movementId: `MOV-${randomUUID().slice(0, 8)}`,
+      productId: args.productId,
+      warehouseId: args.warehouseId,
+      fromLocation: delta >= 0 ? 'cycle-count' : args.location,
+      toLocation: delta >= 0 ? args.location : 'cycle-count',
+      qty: Math.abs(delta),
+      timestamp: new Date().toISOString(),
+      status: 'confirmed',
+    };
+    if (delta !== 0) {
+      this.movements.unshift(movement);
+      this.save();
+    }
+
+    return { previousQty, newQty: args.targetQty, delta, movement: delta !== 0 ? movement : null };
   }
 
   createPurchaseRequisition(args: { materialId: string; warehouseId: string; qty: number; note?: string }) {
@@ -85,6 +147,12 @@ export class WriteLedger {
       );
       if (source) {
         source.quantity -= move.qty;
+      }
+
+      // Synthetic endpoints (goods receipt inflow, cycle-count writeoffs) must
+      // never materialize as real storage locations.
+      if (['cycle-count', 'inbound'].includes(move.toLocation.toLowerCase())) {
+        continue;
       }
 
       const sample = source || result.find((r) => r.productId === move.productId || r.materialId === move.productId);

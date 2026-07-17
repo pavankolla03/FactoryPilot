@@ -125,6 +125,49 @@ mcpServer.registerTool(
   );
 
   mcpServer.registerTool(
+    'receivePurchaseOrder',
+    {
+      title: 'Receive a purchase order (goods receipt)',
+      description:
+        'Posts the goods receipt for a purchase order: the ordered quantity is booked into the receiving location of its warehouse and the PO is marked delivered. A write operation requiring approval.',
+      inputSchema: {
+        poNumber: z.string(),
+        warehouseId: z.string(),
+      },
+    },
+    async ({ poNumber, warehouseId }) => {
+      const result = await iflowPost('/iflow/goods-receipt', { poNumber, warehouseId });
+      return {
+        content: [{ type: 'text', text: JSON.stringify(result) }],
+        structuredContent: result,
+      };
+    },
+  );
+
+  mcpServer.registerTool(
+    'adjustStock',
+    {
+      title: 'Adjust stock to a counted quantity (cycle count)',
+      description:
+        'Sets the stock of a product at a location to the physically counted quantity, recording the discrepancy as a cycle-count adjustment. A write operation requiring approval.',
+      inputSchema: {
+        productId: z.string(),
+        warehouseId: z.string(),
+        location: z.string(),
+        targetQty: z.coerce.number().int().min(0),
+        reason: z.string().optional(),
+      },
+    },
+    async (input) => {
+      const result = await iflowPost('/iflow/adjust', input);
+      return {
+        content: [{ type: 'text', text: JSON.stringify(result) }],
+        structuredContent: result,
+      };
+    },
+  );
+
+  mcpServer.registerTool(
     'getDemandTrend',
     {
       title: 'Get movement/demand trend for a warehouse',

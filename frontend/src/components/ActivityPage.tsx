@@ -1,15 +1,52 @@
+import { Fragment, useState } from 'react';
+import type { AxiosInstance } from 'axios';
 import type { SessionLogEntry } from '@manufacturing-agent/shared';
 import { EmptyState, Icon, StatusChip, paths } from './ui';
 import { useI18n } from '../i18n';
 
+type DetailMessage = {
+  role: string;
+  content: string;
+  tool_calls_json: unknown;
+  created_at: string;
+};
+
 export function ActivityPage({
   sessionLogs,
   onExport,
+  client,
 }: {
   sessionLogs: SessionLogEntry[];
   onExport: () => void;
+  client: AxiosInstance;
 }) {
   const { t } = useI18n();
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [detail, setDetail] = useState<Record<string, DetailMessage[] | 'loading' | 'none'>>({});
+
+  async function toggleRow(row: SessionLogEntry) {
+    if (expandedId === row.id) {
+      setExpandedId(null);
+      return;
+    }
+    setExpandedId(row.id);
+    if (detail[row.id]) {
+      return;
+    }
+    if (!row.conversation_id) {
+      setDetail((prev) => ({ ...prev, [row.id]: 'none' }));
+      return;
+    }
+    setDetail((prev) => ({ ...prev, [row.id]: 'loading' }));
+    try {
+      const res = await client.get(`/api/conversations/${row.conversation_id}/messages`, {
+        params: { includeTools: 1 },
+      });
+      setDetail((prev) => ({ ...prev, [row.id]: res.data }));
+    } catch {
+      setDetail((prev) => ({ ...prev, [row.id]: 'none' }));
+    }
+  }
   return (
     <section className="card overflow-hidden">
       <div className="flex items-center justify-between border-b border-fp-line px-6 py-4">
@@ -47,7 +84,11 @@ export function ActivityPage({
             </thead>
             <tbody>
               {sessionLogs.map((row) => (
-                <tr key={row.id} className="border-b border-fp-line transition last:border-0 hover:bg-fp-bg/60">
+                <Fragment key={row.id}>
+                <tr
+                  className="cursor-pointer border-b border-fp-line transition last:border-0 hover:bg-fp-bg/60"
+                  onClick={() => void toggleRow(row)}
+                >
                   <td className="table-cell whitespace-nowrap text-fp-ink-2">
                     {new Date(row.created_at).toLocaleTimeString()}
                     <div className="text-[11px] text-fp-ink-3">{new Date(row.created_at).toLocaleDateString()}</div>
@@ -76,6 +117,14 @@ export function ActivityPage({
                   <td className="table-cell font-medium">{Number(row.tokens_used).toLocaleString()}</td>
                   <td className="table-cell whitespace-nowrap text-fp-ink-2">{row.latency_ms} ms</td>
                 </tr>
+                {expandedId === row.id && (
+                  <tr className="border-b border-fp-line bg-fp-bg/40">
+                    <td colSpan={7} className="px-6 py-4">
+                      <AuditDetail row={row} detail={detail[row.id]} />
+                    </td>
+                  </tr>
+                )}
+                </Fragment>
               ))}
             </tbody>
           </table>
@@ -105,4 +154,58 @@ function CacheCell({ status }: { status: string }) {
     return <span className="chip bg-fp-bg text-fp-ink-2">Miss</span>;
   }
   return <span className="text-xs text-fp-ink-3">—</span>;
+}
+
+
+function AuditDetail({ row, detail }: { row: SessionLogEntry; detail?: DetailMessage[] | 'loading' | 'none' }) {
+  return (
+    <div className="space-y-3">
+      <div>
+        <div className="text-[11px] font-semibold uppercase tracking-wider text-fp-ink-3">Full request</div>
+        <div className="mt-1 text-sm text-fp-ink">{row.query_text}</div>
+      </div>
+
+      {detail === 'loading' && <div className="text-xs text-fp-ink-3">Loading tool calls…</div>}
+      {detail === 'none' && (
+        <div className="text-xs text-fp-ink-3">No conversation detail available for this entry.</div>
+      )}
+      {Array.isArray(detail) && (
+        <div>
+          <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-fp-ink-3">
+            Tool calls & results
+          </div>
+          <div className="space-y-1.5">
+            {detail
+              .filter((m) => m.role === 'tool' || (m.role === 'assistant' && Array.isArray(m.tool_calls_json)))
+              .slice(-8)
+              .map((m, i) =>
+                m.role === 'assistant' ? (
+                  <div key={i} className="rounded-lg bg-fp-accent-soft/50 px-3 py-2 text-xs">
+                    <span className="font-semibold text-fp-accent-dark">called:</span>{' '}
+                    {(m.tool_calls_json as Array<{ name: string; arguments: unknown }>)
+                      .map((tc) => `${tc.name}(${JSON.stringify(tc.arguments)})`)
+                      .join(', ')}
+                  </div>
+                ) : (
+                  <pre key={i} className="max-h-40 overflow-auto rounded-lg bg-fp-surface px-3 py-2 text-[11px] leading-relaxed text-fp-ink-2 border border-fp-line">
+                    {formatToolResult(m.content)}
+                  </pre>
+                ),
+              )}
+            {detail.filter((m) => m.role === 'tool').length === 0 && (
+              <div className="text-xs text-fp-ink-3">No tools were invoked in this conversation turn.</div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function formatToolResult(content: string): string {
+  try {
+    return JSON.stringify(JSON.parse(content), null, 2).slice(0, 1500);
+  } catch {
+    return content.slice(0, 1500);
+  }
 }

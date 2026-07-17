@@ -3,7 +3,7 @@ import axios from 'axios';
 import { io, Socket } from 'socket.io-client';
 import type { PendingAction, SessionLogEntry } from '@manufacturing-agent/shared';
 import { Landing } from './components/Landing';
-import { ApprovalsPage } from './components/ApprovalsPage';
+import { ApprovalsPage, type ScheduledReport } from './components/ApprovalsPage';
 import { BoardPage } from './components/BoardPage';
 import { AuthPage } from './components/AuthPages';
 import { Sidebar, type Tab } from './components/Sidebar';
@@ -66,6 +66,7 @@ function App() {
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
   const [alerts, setAlerts] = useState<StockAlert[]>([]);
+  const [schedules, setSchedules] = useState<ScheduledReport[]>([]);
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [bellOpen, setBellOpen] = useState(false);
   const bellRef = useRef<HTMLDivElement>(null);
@@ -327,6 +328,8 @@ function App() {
   async function loadAlerts() {
     const res = await client.get('/api/alerts');
     setAlerts(res.data);
+    const reports = await client.get('/api/reports');
+    setSchedules(reports.data);
   }
 
   async function deleteAlert(id: string) {
@@ -492,9 +495,16 @@ function App() {
           <ApprovalsPage
             pendingActions={pendingActions}
             alerts={alerts}
+            schedules={schedules}
             onConfirm={(id) => void confirmAction(id)}
             onCancel={(id) => setPendingActions((prev) => prev.filter((x) => x.actionId !== id))}
             onDeleteAlert={(id) => void deleteAlert(id)}
+            onDeleteSchedule={(id) =>
+              withFeedback(async () => {
+                await client.delete(`/api/reports/${id}`);
+                await loadAlerts();
+              }, 'Scheduled report removed.')
+            }
           />
         )}
 
@@ -511,6 +521,7 @@ function App() {
         {tab === 'logs' && (
           <ActivityPage
             sessionLogs={sessionLogs}
+            client={client}
             onExport={() => void exportCsv('/api/session-logs/export.csv', 'factorypilot-activity.csv')}
           />
         )}

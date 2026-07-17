@@ -13,7 +13,10 @@ import { RedisService } from '../common/redis.service';
 import { AlertsService } from '../alerts/alerts.service';
 import type { NormalizedToolCall } from '../llm/types';
 
-const WRITE_TOOLS = new Set(['moveStock', 'draftPurchaseRequisition']);
+const WRITE_TOOLS = new Set(['moveStock', 'draftPurchaseRequisition', 'receivePurchaseOrder', 'adjustStock']);
+
+/** Tools that mutate warehouse stock — their caches must be invalidated. */
+const STOCK_MUTATING_TOOLS = new Set(['moveStock', 'receivePurchaseOrder', 'adjustStock']);
 
 // Tools served by the orchestrator itself (user-scoped state), not by an MCP server.
 const LOCAL_TOOLS = [
@@ -47,6 +50,45 @@ const LOCAL_TOOLS = [
         threshold: { type: 'number' },
       },
       required: ['warehouseId'],
+    },
+  },
+  {
+    name: 'rememberPreference',
+    description:
+      "Store a lasting preference for the current user (e.g. their default warehouse, preferred threshold). Use when the user says things like 'remember that…' or 'my warehouse is…'. Key is a short snake_case name.",
+    inputSchema: {
+      type: 'object',
+      properties: { key: { type: 'string' }, value: { type: 'string' } },
+      required: ['key', 'value'],
+    },
+  },
+  {
+    name: 'scheduleReport',
+    description:
+      "Schedule a recurring report delivered to the user's notifications and webhook. report is 'shift_handover' or 'usage_summary'. hour is 0-23 (server time). dayOfWeek 0-6 (0=Sunday) makes it weekly; omit for daily. Use when the user asks for a report every day/week at some time.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        report: { type: 'string', enum: ['shift_handover', 'usage_summary'] },
+        warehouseId: { type: 'string' },
+        hour: { type: 'number' },
+        dayOfWeek: { type: 'number' },
+      },
+      required: ['report', 'hour'],
+    },
+  },
+  {
+    name: 'listScheduledReports',
+    description: "List the current user's scheduled reports.",
+    inputSchema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'deleteScheduledReport',
+    description: 'Delete one of the current user\'s scheduled reports by id.',
+    inputSchema: {
+      type: 'object',
+      properties: { scheduleId: { type: 'string' } },
+      required: ['scheduleId'],
     },
   },
   {
@@ -131,6 +173,14 @@ export class ChatService {
     }
 
     const tools = [...this.mcp.listTools(), ...LOCAL_TOOLS];
+    const prefsRow = await this.db.query<{ preferences: Record<string, string> }>(
+      'SELECT preferences FROM users WHERE id = $1',
+      [user.id],
+    );
+    const preferences = prefsRow.rows[0]?.preferences || {};
+    const preferenceNote = Object.keys(preferences).length
+      ? ` Known user preferences (apply as defaults unless overridden): ${JSON.stringify(preferences)}.`
+      : '';
     const systemPrompt =
       "You are Otto, FactoryPilot's warehouse copilot for SAP manufacturing. " +
       'Style: open with a one-sentence direct answer, then add structure only when it helps — markdown tables for records, ' +
@@ -140,7 +190,8 @@ export class ChatService {
       'Never claim a write action has already completed before confirmation. ' +
       'Invoke tools ONLY through the function-calling mechanism; never print a JSON tool call as text. ' +
       'Copy parameter values exactly as the user stated them (e.g. location names like "packing" or "shipping"). ' +
-      'You can create stock alerts (createStockAlert) when the user asks to be notified about stock levels.';
+      'You can create stock alerts (createStockAlert) when the user asks to be notified about stock levels.' +
+      preferenceNote;
 
     const conversationHistory = await this.getConversationMessages(convId);
     const llmMessages: LlmChatMessage[] = [{ role: 'system', content: systemPrompt }, ...conversationHistory];
@@ -543,18 +594,68 @@ export class ChatService {
     return { executed: false, pendingAction: action };
   }
 
+  /**
+   * Cycle-count adjustment from the board. Always requires approval —
+   * inventory adjustments are audit-sensitive regardless of size.
+   */
+  async proposeAdjust(
+    user: AuthUser,
+    params: { warehouseId: string; productId: string; location: string; countedQty: number; systemQty: number },
+  ) {
+    this.assertScope(user, params.warehouseId, 'write');
+    const delta = params.countedQty - params.systemQty;
+
+    const action: PendingAction = {
+      actionId: randomUUID(),
+      tool: 'adjustStock',
+      params: {
+        productId: params.productId,
+        warehouseId: params.warehouseId,
+        location: params.location,
+        targetQty: params.countedQty,
+        reason: `cycle count: system ${params.systemQty}, counted ${params.countedQty} (${delta >= 0 ? '+' : ''}${delta})`,
+      },
+      humanSummary: `Cycle count: set ${params.productId} at ${params.location} (WH ${params.warehouseId}) to ${params.countedQty} — system shows ${params.systemQty} (${delta >= 0 ? '+' : ''}${delta})`,
+      requestedBy: user.displayName,
+      requestedById: user.id,
+      makerChecker: (await this.resolveWritePolicy(user.id, [params.warehouseId])).makerChecker,
+    };
+
+    await this.redis.raw.setEx(
+      `pending:action:${action.actionId}`,
+      900,
+      JSON.stringify({ userId: user.id, action }),
+    );
+    this.realtime.emitPendingAction(user.id, action);
+
+    await this.writeSessionLog({
+      userId: user.id,
+      conversationId: null,
+      queryText: `cycle-count:${params.productId}@${params.location} ${params.systemQty}→${params.countedQty}`,
+      toolsInvoked: ['adjustStock'],
+      cacheStatus: 'n/a',
+      tokensUsed: 0,
+      status: 'success',
+      latencyMs: 0,
+    });
+
+    return { executed: false, pendingAction: action };
+  }
+
   /** Executes a write tool through MCP and maintains the caches it touches. */
   private async executeWriteTool(tool: string, params: Record<string, unknown>) {
     const result = await this.mcp.callTool(tool, params);
 
-    if (tool === 'moveStock') {
+    if (STOCK_MUTATING_TOOLS.has(tool)) {
       const warehouse = String(params.warehouseId || 'global');
       await this.invalidateWarehouseCache(warehouse);
-      const movement = (result?.structuredContent || result) as Record<string, unknown>;
-      await this.redis.raw.zAdd(`cache:movements:${warehouse}`, {
-        score: Date.now(),
-        value: JSON.stringify(movement),
-      });
+      const structured = (result?.structuredContent || result) as { movement?: unknown };
+      if (structured.movement) {
+        await this.redis.raw.zAdd(`cache:movements:${warehouse}`, {
+          score: Date.now(),
+          value: JSON.stringify(structured),
+        });
+      }
     }
 
     return result;
@@ -644,6 +745,43 @@ export class ChatService {
           note: 'Use draftPurchaseRequisition to create a draft order for any suggestion the user accepts.',
         },
       };
+    }
+
+    if (name === 'rememberPreference') {
+      const key = String(args.key || '').trim();
+      const value = String(args.value || '').trim();
+      if (!key || !value) {
+        validationError('key and value are required');
+      }
+      await this.db.query(
+        'UPDATE users SET preferences = preferences || jsonb_build_object($1::text, $2::text) WHERE id = $3',
+        [key, value, user.id],
+      );
+      return { structuredContent: { remembered: true, key, value } };
+    }
+
+    if (name === 'scheduleReport') {
+      const schedule = await this.alerts.createSchedule(user.id, {
+        report: String(args.report || 'shift_handover'),
+        warehouseId: args.warehouseId ? String(args.warehouseId) : null,
+        hour: Number(args.hour),
+        dayOfWeek: args.dayOfWeek === undefined || args.dayOfWeek === null ? null : Number(args.dayOfWeek),
+      });
+      return {
+        structuredContent: {
+          scheduled: true,
+          schedule,
+          note: 'Delivered to notifications and the user webhook if configured. Hours are server time (24h).',
+        },
+      };
+    }
+
+    if (name === 'listScheduledReports') {
+      return { structuredContent: { records: await this.alerts.listSchedules(user.id) } };
+    }
+
+    if (name === 'deleteScheduledReport') {
+      return { structuredContent: await this.alerts.deleteSchedule(user.id, String(args.scheduleId || '')) };
     }
 
     if (name === 'getShiftHandover') {

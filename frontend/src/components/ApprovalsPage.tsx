@@ -3,18 +3,32 @@ import { EmptyState, Icon, paths } from './ui';
 import type { StockAlert } from './ChatPage';
 import { useI18n } from '../i18n';
 
+export type ScheduledReport = {
+  id: string;
+  report: string;
+  warehouse_id: string | null;
+  hour: number;
+  day_of_week: number | null;
+};
+
+const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
 export function ApprovalsPage({
   pendingActions,
   alerts,
+  schedules,
   onConfirm,
   onCancel,
   onDeleteAlert,
+  onDeleteSchedule,
 }: {
   pendingActions: PendingAction[];
   alerts: StockAlert[];
+  schedules: ScheduledReport[];
   onConfirm: (actionId: string) => void;
   onCancel: (actionId: string) => void;
   onDeleteAlert: (id: string) => void;
+  onDeleteSchedule: (id: string) => void;
 }) {
   const { t } = useI18n();
 
@@ -83,6 +97,48 @@ export function ApprovalsPage({
             ))}
           </div>
         )}
+
+        <div className="mt-5 border-t border-fp-line pt-4">
+          <div className="mb-3 flex items-center justify-between">
+            <div>
+              <h3 className="text-sm font-semibold text-fp-ink">Scheduled reports</h3>
+              <p className="text-xs text-fp-ink-3">Ask Otto: "send me the shift handover every Monday at 7".</p>
+            </div>
+            {schedules.length > 0 && (
+              <span className="chip bg-fp-accent-soft text-fp-accent-dark">{schedules.length}</span>
+            )}
+          </div>
+
+          {schedules.length === 0 ? (
+            <p className="text-xs leading-relaxed text-fp-ink-3">No scheduled reports yet.</p>
+          ) : (
+            <div className="space-y-2">
+              {schedules.map((s) => (
+                <div
+                  key={s.id}
+                  className="flex items-center justify-between gap-2 rounded-xl border border-fp-line px-3 py-2.5"
+                >
+                  <div className="min-w-0">
+                    <div className="truncate text-[13px] font-medium text-fp-ink">
+                      {s.report === 'usage_summary' ? 'Usage summary' : 'Shift handover'}
+                      {s.warehouse_id ? ` · WH ${s.warehouse_id}` : ''}
+                    </div>
+                    <div className="text-[11px] text-fp-ink-3">
+                      {s.day_of_week === null ? 'Daily' : `Every ${DOW[s.day_of_week]}`} at{' '}
+                      {String(s.hour).padStart(2, '0')}:00
+                    </div>
+                  </div>
+                  <button
+                    className="grid h-7 w-7 shrink-0 place-items-center rounded-lg text-fp-ink-3 transition hover:bg-fp-bad-soft hover:text-fp-bad"
+                    onClick={() => onDeleteSchedule(s.id)}
+                  >
+                    <Icon path={paths.x} size={12} strokeWidth={2.4} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
       </section>
     </div>
   );

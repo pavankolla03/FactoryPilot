@@ -130,3 +130,16 @@ CREATE INDEX IF NOT EXISTS idx_conversations_user_id ON conversations (user_id);
 CREATE INDEX IF NOT EXISTS idx_conv_msgs_conv_id ON conversation_messages (conversation_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_session_logs_user_time ON session_logs (user_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_session_logs_status ON session_logs (status);
+
+ALTER TABLE users ADD COLUMN IF NOT EXISTS preferences JSONB NOT NULL DEFAULT '{}'::jsonb;
+
+CREATE TABLE IF NOT EXISTS scheduled_reports (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  report TEXT NOT NULL,
+  warehouse_id TEXT,
+  hour INT NOT NULL,
+  day_of_week INT,
+  active BOOLEAN NOT NULL DEFAULT true,
+  created_at TIMESTAMP NOT NULL DEFAULT NOW()
+);

@@ -346,6 +346,74 @@ function prettyKey(key: string) {
     .replace('Id', 'ID');
 }
 
+/** Parses GFM tables out of markdown; returns chartable label/value pairs. */
+function extractChartData(markdown: string): Array<{ title: string; rows: Array<{ label: string; value: number }> }> {
+  const charts: Array<{ title: string; rows: Array<{ label: string; value: number }> }> = [];
+  const lines = markdown.split('\n');
+  let i = 0;
+  while (i < lines.length) {
+    if (lines[i].trim().startsWith('|') && i + 1 < lines.length && /^\s*\|[\s:|-]+\|\s*$/.test(lines[i + 1])) {
+      const header = lines[i].split('|').map((c) => c.trim()).filter(Boolean);
+      const rows: Array<{ label: string; value: number }> = [];
+      let j = i + 2;
+      while (j < lines.length && lines[j].trim().startsWith('|')) {
+        const cells = lines[j].split('|').map((c) => c.trim()).filter(Boolean);
+        if (cells.length >= 2) {
+          const value = Number(String(cells[cells.length - 1]).replace(/[,%a-zA-Z\s]/g, ''));
+          if (Number.isFinite(value) && cells[0]) {
+            rows.push({ label: cells[0].replace(/\*\*/g, ''), value });
+          }
+        }
+        j += 1;
+      }
+      if (rows.length >= 2 && rows.every((r) => Number.isFinite(r.value))) {
+        charts.push({ title: header[0] || 'Breakdown', rows });
+      }
+      i = j;
+    } else {
+      i += 1;
+    }
+  }
+  return charts;
+}
+
+const CHART_LOCATION_COLORS: Record<string, string> = {
+  receiving: '#2A78D6',
+  inspection: '#4A3AA7',
+  bulk: '#B87A00',
+  packing: '#1B7F3B',
+  shipping: '#D95926',
+};
+
+function InlineBarChart({ rows }: { rows: Array<{ label: string; value: number }> }) {
+  const max = Math.max(...rows.map((r) => Math.abs(r.value)), 1);
+  return (
+    <div className="mb-3 rounded-2xl border border-[#E8E6DA] bg-white p-4">
+      <div className="space-y-2">
+        {rows.map((row) => {
+          const color = CHART_LOCATION_COLORS[row.label.toLowerCase().trim()] || '#2A78D6';
+          return (
+            <div key={row.label} className="flex items-center gap-2">
+              <span className="w-24 shrink-0 truncate text-right text-[11px] font-medium text-[#56544D]">
+                {row.label}
+              </span>
+              <div className="h-4 flex-1 overflow-hidden rounded-md bg-[#F1F0E9]">
+                <div
+                  className="h-full rounded-md"
+                  style={{ width: `${Math.max((Math.abs(row.value) / max) * 100, 2)}%`, background: color }}
+                />
+              </div>
+              <span className="w-14 shrink-0 text-[11px] font-semibold tabular-nums text-[#262521]">
+                {row.value.toLocaleString()}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function AssistantBody({ text }: { text: string }) {
   const records = extractRecords(text);
 
@@ -399,9 +467,16 @@ function AssistantBody({ text }: { text: string }) {
     );
   }
 
+  const charts = extractChartData(text);
+
   return (
-    <div className="md-body chat-serif">
-      <ReactMarkdown remarkPlugins={[remarkGfm]}>{text}</ReactMarkdown>
+    <div>
+      {charts.map((chart, i) => (
+        <InlineBarChart key={i} rows={chart.rows} />
+      ))}
+      <div className="md-body chat-serif">
+        <ReactMarkdown remarkPlugins={[remarkGfm]}>{text}</ReactMarkdown>
+      </div>
     </div>
   );
 }

@@ -178,7 +178,9 @@ export function createApp(state = new IflowState(), ledger = new WriteLedger()) 
 
     try {
       let records = sapLiveEnabled()
-        ? await fetchLivePurchaseOrders(warehouseId)
+        ? (await fetchLivePurchaseOrders(warehouseId)).map((po) =>
+            ledger.receivedPOs.includes(po.poNumber) ? { ...po, status: 'delivered' as const } : po,
+          )
         : state.getPurchaseOrders(warehouseId, status);
       if (sapLiveEnabled() && status) {
         records = records.filter((r) => r.status === status);
@@ -219,6 +221,58 @@ export function createApp(state = new IflowState(), ledger = new WriteLedger()) 
     }
     const pr = ledger.createPurchaseRequisition(parsed.data);
     return res.json({ success: true, purchaseRequisition: pr, dataSource: 'write-ledger' });
+  });
+
+  app.post('/iflow/goods-receipt', async (req, res) => {
+    const parsed = z.object({ poNumber: z.string().min(1), warehouseId: z.string().optional() }).safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json(errorResponse('VALIDATION_ERROR', parsed.error.message));
+    }
+
+    try {
+      if (sapLiveEnabled()) {
+        const pos = await fetchLivePurchaseOrders(parsed.data.warehouseId);
+        const po = pos.find((p) => p.poNumber === parsed.data.poNumber);
+        if (!po) {
+          return res.status(404).json(errorResponse('VALIDATION_ERROR', `purchase order ${parsed.data.poNumber} not found`));
+        }
+        const result = ledger.receivePurchaseOrder(po);
+        return res.json({ success: true, ...result, dataSource: 'write-ledger' });
+      }
+      const result = state.receivePurchaseOrder(parsed.data.poNumber);
+      return res.json({ success: true, ...result, dataSource: 'simulator' });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'unknown error';
+      return res.status(400).json(errorResponse('VALIDATION_ERROR', message));
+    }
+  });
+
+  app.post('/iflow/adjust', async (req, res) => {
+    const parsed = z
+      .object({
+        productId: z.string().min(1),
+        warehouseId: z.string().min(1),
+        location: z.string().min(1),
+        targetQty: z.number().int().min(0),
+        reason: z.string().optional(),
+      })
+      .safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json(errorResponse('VALIDATION_ERROR', parsed.error.message));
+    }
+
+    try {
+      if (sapLiveEnabled()) {
+        const live = await fetchLiveStock(undefined, parsed.data.warehouseId);
+        const result = ledger.adjustStock(live, parsed.data);
+        return res.json({ success: true, ...result, dataSource: 'write-ledger' });
+      }
+      const result = state.adjustStock(parsed.data);
+      return res.json({ success: true, ...result, dataSource: 'simulator' });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'unknown error';
+      return res.status(400).json(errorResponse('VALIDATION_ERROR', message));
+    }
   });
 
   app.post('/iflow/move', async (req, res) => {
