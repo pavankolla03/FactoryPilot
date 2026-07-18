@@ -134,6 +134,8 @@ function buildFakes() {
     listRuns: async () => [],
     startRun: async () => ({ runId: 'r1' }),
     onActionExecuted: async () => undefined,
+    recallEpisodes: async () => [],
+    announceApproval: async () => undefined,
   } as unknown as AgentsService;
 
   return { db, redis, providerFactory, mcp, quota, realtime, alerts, agentsSvc, providerRounds, sessionLogs, messages };
