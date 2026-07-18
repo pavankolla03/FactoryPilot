@@ -14,18 +14,25 @@ export async function streamOpenAICompletion(
   tools: LlmToolDefinition[],
   onTextDelta: (delta: string) => void,
 ): Promise<LlmCompletionResult> {
+  const toolParams =
+    tools.length > 0
+      ? {
+          tools: tools.map((tool) => ({
+            type: 'function' as const,
+            function: {
+              name: tool.name,
+              description: tool.description,
+              parameters: tool.inputSchema,
+            },
+          })),
+          tool_choice: 'auto' as const,
+        }
+      : {};
+
   const stream = await client.chat.completions.create({
     model,
     messages: toOpenAIMessages(messages),
-    tools: tools.map((tool) => ({
-      type: 'function' as const,
-      function: {
-        name: tool.name,
-        description: tool.description,
-        parameters: tool.inputSchema,
-      },
-    })),
-    tool_choice: 'auto',
+    ...toolParams,
     temperature: Number(process.env.LLM_TEMPERATURE ?? 0),
     stream: true,
     stream_options: { include_usage: true },

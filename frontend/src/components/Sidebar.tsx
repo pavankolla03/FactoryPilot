@@ -52,6 +52,11 @@ export function Sidebar({
           <button key={n.id} className={`nav-item ${tab === n.id ? 'active' : ''}`} onClick={() => onTab(n.id)}>
             <Icon path={n.icon} size={17} />
             <span className="flex-1 text-left">{t(n.labelKey)}</span>
+            {n.id === 'autonomy' && (
+              <span className="rounded-full bg-fp-accent/20 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-[#7FB0E8]">
+                beta
+              </span>
+            )}
             {n.id === 'approvals' && pendingCount > 0 && (
               <span className="grid h-5 min-w-[20px] place-items-center rounded-full bg-fp-warn-soft px-1 text-[10px] font-bold text-fp-warn">
                 {pendingCount}

@@ -6,7 +6,9 @@ import { DbService } from '../common/db.service';
 import { RedisService } from '../common/redis.service';
 import { McpService } from '../mcp/mcp.service';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
+import { LlmProviderFactory } from '../llm/provider.factory';
 import { validationError } from '../common/errors';
+import jwt from 'jsonwebtoken';
 
 export interface AgentGoal {
   id: string;
@@ -22,7 +24,7 @@ export interface AgentGoal {
 
 interface RunStep {
   at: string;
-  type: 'observe' | 'plan' | 'act' | 'approval' | 'verify' | 'info' | 'error';
+  type: 'observe' | 'plan' | 'act' | 'approval' | 'verify' | 'critic' | 'outcome' | 'info' | 'error';
   detail: string;
   status: 'ok' | 'pending' | 'failed';
 }
@@ -50,23 +52,28 @@ export class AgentsService {
     private readonly redis: RedisService,
     private readonly mcp: McpService,
     private readonly realtime: RealtimeGateway,
+    private readonly llm: LlmProviderFactory,
   ) {}
 
   // ---------- goals ----------
 
   async createGoal(
     userId: string,
-    args: { warehouseId: string; threshold?: number; autonomy?: string; dailyBudgetQty?: number },
+    args: { warehouseId: string; threshold?: number; autonomy?: string; dailyBudgetQty?: number; agent?: string },
   ): Promise<AgentGoal> {
     const autonomy = args.autonomy || 'propose';
     if (!['observe', 'propose', 'act'].includes(autonomy)) {
       validationError("autonomy must be 'observe', 'propose', or 'act'");
     }
+    const agent = args.agent || 'replenishment';
+    if (!['replenishment', 'cycle_count'].includes(agent)) {
+      validationError("agent must be 'replenishment' or 'cycle_count'");
+    }
     const row = await this.db.query<AgentGoal>(
-      `INSERT INTO agent_goals(user_id, warehouse_id, threshold, autonomy, daily_budget_qty)
-       VALUES($1, $2, $3, $4, $5)
+      `INSERT INTO agent_goals(user_id, agent, warehouse_id, threshold, autonomy, daily_budget_qty)
+       VALUES($1, $2, $3, $4, $5, $6)
        RETURNING *`,
-      [userId, args.warehouseId, args.threshold ?? 50, autonomy, args.dailyBudgetQty ?? 200],
+      [userId, agent, args.warehouseId, args.threshold ?? 50, autonomy, args.dailyBudgetQty ?? 200],
     );
     return row.rows[0];
   }
@@ -121,27 +128,33 @@ export class AgentsService {
     const autonomy = goal?.autonomy ?? 'propose';
     const budget = goal?.daily_budget_qty ?? 200;
 
+    const agent = goal?.agent ?? 'replenishment';
+    const goalText =
+      agent === 'cycle_count'
+        ? `Weekly cycle-count plan for warehouse ${options.warehouseId} (trigger: ${options.trigger})`
+        : `Keep warehouse ${options.warehouseId} stocked above ${threshold} (autonomy: ${autonomy}, trigger: ${options.trigger})`;
+
     const runRow = await this.db.query<{ id: string }>(
       `INSERT INTO agent_runs(goal_id, user_id, agent, warehouse_id, goal_text, status)
-       VALUES($1, $2, 'replenishment', $3, $4, 'running')
+       VALUES($1, $2, $3, $4, $5, 'running')
        RETURNING id`,
-      [
-        goal?.id ?? null,
-        options.userId,
-        options.warehouseId,
-        `Keep warehouse ${options.warehouseId} stocked above ${threshold} (autonomy: ${autonomy}, trigger: ${options.trigger})`,
-      ],
+      [goal?.id ?? null, options.userId, agent, options.warehouseId, goalText],
     );
     const runId = runRow.rows[0].id;
     await this.addStep(runId, 'info', `Run started (trigger: ${options.trigger}, autonomy: ${autonomy})`, 'ok');
 
+    const executor =
+      agent === 'cycle_count'
+        ? this.executeCycleCount(runId, options.userId, { warehouseId: options.warehouseId })
+        : this.executeReplenishment(runId, options.userId, options.displayName, {
+            warehouseId: options.warehouseId,
+            threshold,
+            autonomy,
+            budget,
+          });
+
     // Fire-and-forget so API callers get the run id immediately.
-    void this.executeReplenishment(runId, options.userId, options.displayName, {
-      warehouseId: options.warehouseId,
-      threshold,
-      autonomy,
-      budget,
-    }).catch(async (error) => {
+    void executor.catch(async (error) => {
       const reason = error instanceof Error ? error.message : 'unknown error';
       await this.addStep(runId, 'error', `Run failed: ${reason}`, 'failed');
       await this.finishRun(runId, 'failed', `Failed: ${reason}`);
@@ -229,6 +242,10 @@ export class AgentsService {
 
     const totalQty = suggestions.reduce((sum, s) => sum + s.suggestedOrderQty, 0);
 
+    // 2b. CRITIC (beta) — a second model pass reviews the plan before any action.
+    const critic = await this.criticReview(cfg.warehouseId, suggestions, poRecords, prRecords);
+    await this.addStep(runId, 'critic', critic.detail, critic.flagged ? 'failed' : 'ok');
+
     // 3. ACT — according to the autonomy level and blast-radius budget.
     if (cfg.autonomy === 'observe') {
       await this.addStep(runId, 'info', 'Autonomy is observe-only: proposals recorded, no action taken.', 'ok');
@@ -240,7 +257,7 @@ export class AgentsService {
       return;
     }
 
-    if (cfg.autonomy === 'act' && totalQty <= cfg.budget) {
+    if (cfg.autonomy === 'act' && totalQty <= cfg.budget && !critic.flagged) {
       for (const s of suggestions) {
         const result = (await this.mcp.callTool('draftPurchaseRequisition', {
           materialId: s.materialId,
@@ -263,13 +280,29 @@ export class AgentsService {
         `Auto-drafted ${suggestions.length} purchase requisition(s), ${totalQty} units total — verified against the source system.`,
       );
       await this.notifyOwner(userId, 'Replenishment run completed', `WH ${cfg.warehouseId}: auto-drafted ${suggestions.length} PR(s), ${totalQty} units. All verified.`);
+      await this.recordEpisode(
+        `wh:${cfg.warehouseId}`,
+        `Auto-replenishment drafted ${suggestions.length} PR(s) for ${suggestions.map((s) => s.materialId).join(', ')} (${totalQty} units).`,
+      );
       return;
     }
 
-    // propose (or act over budget → escalate to human)
+    // Maker-checker policy applies to agent proposals exactly as to human ones.
+    const policy = await this.db.query<{ mc: boolean }>(
+      `SELECT (
+         COALESCE((SELECT maker_checker FROM approval_policies WHERE user_id = $1), false)
+         OR COALESCE((SELECT bool_or(maker_checker) FROM warehouse_policies WHERE warehouse_id = $2), false)
+       ) AS mc`,
+      [userId, cfg.warehouseId],
+    );
+    const makerChecker = Boolean(policy.rows[0]?.mc);
+
+    // propose (or act over budget / critic-flagged → escalate to human)
     const escalation =
       cfg.autonomy === 'act'
-        ? ` Total ${totalQty} exceeds the daily budget of ${cfg.budget} — escalated to human approval.`
+        ? critic.flagged
+          ? ' Critic flagged the plan — escalated to human approval.'
+          : ` Total ${totalQty} exceeds the daily budget of ${cfg.budget} — escalated to human approval.`
         : '';
     const action: PendingAction = {
       actionId: randomUUID(),
@@ -291,12 +324,171 @@ export class AgentsService {
       requestedBy: `Replenishment Agent (for ${displayName})`,
       requestedById: userId,
       runId,
+      makerChecker,
+      ...(critic.flagged ? { anomaly: { reason: `Critic: ${critic.reason}` } } : {}),
     };
     await this.redis.raw.setEx(`pending:action:${action.actionId}`, 1200, JSON.stringify({ userId, action }));
     this.realtime.emitPendingAction(userId, action);
     await this.addStep(runId, 'approval', `Awaiting human approval of ${suggestions.length} draft(s).${escalation}`, 'pending');
     await this.setRunStatus(runId, 'waiting_approval');
-    await this.notifyOwner(userId, 'Replenishment plan awaiting approval', `WH ${cfg.warehouseId}: ${action.humanSummary}`);
+    await this.notifyOwner(
+      userId,
+      'Replenishment plan awaiting approval',
+      `WH ${cfg.warehouseId}: ${action.humanSummary}\nOne-click approve (beta): ${this.quickApproveLink(action.actionId, userId)}`,
+    );
+  }
+
+  /**
+   * CRITIC (beta): an LLM reviews the plan against open orders and drafts.
+   * Fails open — if the model is unavailable the plan proceeds with a note.
+   */
+  private async criticReview(
+    warehouseId: string,
+    suggestions: Suggestion[],
+    pos: Array<Record<string, unknown>>,
+    prs: Array<Record<string, unknown>>,
+  ): Promise<{ flagged: boolean; reason: string; detail: string }> {
+    try {
+      const provider = this.llm.getProvider();
+      const prompt =
+        `You are a supply-chain compliance reviewer. Review this reorder plan for warehouse ${warehouseId}.\n` +
+        `PLAN: ${JSON.stringify(suggestions)}\n` +
+        `OPEN_POS: ${JSON.stringify(pos.map((p) => ({ m: p.materialId, q: p.qty, s: p.status })))}\n` +
+        `EXISTING_DRAFTS: ${JSON.stringify(prs.map((p) => ({ m: p.materialId, q: p.qty })))}\n` +
+        `Reply with exactly one line: "APPROVE" if the plan is sensible, or "FLAG: <short reason>" if it duplicates ` +
+        `existing supply, orders implausible quantities, or otherwise looks wrong.`;
+      const result = await provider.complete([{ role: 'user', content: prompt }], []);
+      const text = (result.text || '').trim();
+      if (/^FLAG/i.test(text)) {
+        const reason = text.replace(/^FLAG:?\s*/i, '').slice(0, 160) || 'unspecified concern';
+        return { flagged: true, reason, detail: `Critic review (${result.modelUsed}): FLAGGED — ${reason}` };
+      }
+      return { flagged: false, reason: '', detail: `Critic review (${result.modelUsed}): plan approved.` };
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : 'unavailable';
+      return { flagged: false, reason: '', detail: `Critic unavailable (${reason}) — proceeding without review.` };
+    }
+  }
+
+  /** CYCLE-COUNT PLANNER (beta): proposes a weekly count checklist. */
+  private async executeCycleCount(runId: string, userId: string, cfg: { warehouseId: string }) {
+    const stock = (await this.mcp.callTool('listWarehouseStock', { warehouseId: cfg.warehouseId })) as {
+      structuredContent?: { records?: Array<Record<string, unknown>> };
+    };
+    const records = stock.structuredContent?.records ?? [];
+    await this.addStep(runId, 'observe', `Observed ${records.length} stock position(s) in WH ${cfg.warehouseId}.`, 'ok');
+
+    if (records.length === 0) {
+      await this.finishRun(runId, 'completed', 'No stock positions to count.');
+      return;
+    }
+
+    // Prioritize low-quantity positions — miscounts hurt most where stock is thin.
+    const picks = [...records]
+      .sort((a, b) => Number(a.quantity || 0) - Number(b.quantity || 0))
+      .slice(0, 5);
+    const checklist = picks
+      .map((r) => `• ${r.productId} @ ${r.location} (system: ${r.quantity})`)
+      .join('\n');
+    await this.addStep(
+      runId,
+      'plan',
+      `Count plan (${picks.length} positions, lowest quantities first): ${picks
+        .map((r) => `${r.productId}@${r.location}`)
+        .join(', ')}`,
+      'ok',
+    );
+
+    await this.notifyOwner(
+      userId,
+      `Cycle-count plan — WH ${cfg.warehouseId}`,
+      `Count these positions and enter results via the board's Count button:\n${checklist}`,
+    );
+    await this.addStep(runId, 'act', 'Checklist delivered to notifications and webhook.', 'ok');
+    await this.finishRun(runId, 'completed', `Proposed a ${picks.length}-position count plan for WH ${cfg.warehouseId}.`);
+    await this.recordEpisode(`wh:${cfg.warehouseId}`, `Cycle-count plan proposed for ${picks.length} positions.`);
+  }
+
+  /** Announce a pending approval on the owner's webhook with a one-click link (beta). */
+  async announceApproval(userId: string, action: PendingAction) {
+    await this.notifyOwner(
+      userId,
+      'Approval requested',
+      `${action.humanSummary}\nOne-click approve (beta): ${this.quickApproveLink(action.actionId, userId)}`,
+    );
+  }
+
+  /** One-click approve link for webhook channels (beta). */
+  quickApproveLink(actionId: string, userId: string) {
+    const secret = process.env.AUTH_JWT_SECRET || process.env.MOCK_JWT_SECRET || 'dev-secret';
+    const token = jwt.sign({ actionId, sub: userId, purpose: 'quick-approve' }, secret, { expiresIn: '20m' });
+    const base = process.env.PUBLIC_BASE_URL || 'http://localhost:3000';
+    return `${base}/api/agents/approvals/quick?token=${token}`;
+  }
+
+  /** OUTCOME TRACKING (beta): did completed replenishment runs actually fix the problem? */
+  @Cron('*/20 * * * *')
+  async checkOutcomes() {
+    const runs = await this.db.query<{ id: string; user_id: string; warehouse_id: string; goal_text: string }>(
+      `SELECT id, user_id, warehouse_id, goal_text
+       FROM agent_runs
+       WHERE agent = 'replenishment' AND status = 'completed' AND outcome IS NULL
+         AND finished_at < NOW() - INTERVAL '10 minutes'
+       LIMIT 10`,
+    );
+
+    for (const run of runs.rows) {
+      try {
+        const thresholdMatch = /above (\d+)/.exec(run.goal_text);
+        const threshold = thresholdMatch ? Number(thresholdMatch[1]) : 50;
+        const [low, prs] = await Promise.all([
+          this.mcp.callTool('getLowStock', { warehouseId: run.warehouse_id, threshold }),
+          this.mcp.callTool('getPurchaseRequisitions', { warehouseId: run.warehouse_id }),
+        ]);
+        const lowRecords = ((low.structuredContent as { records?: Array<Record<string, unknown>> })?.records ??
+          []) as Array<Record<string, unknown>>;
+        const draftedMaterials = new Set(
+          (((prs.structuredContent as { records?: Array<Record<string, unknown>> })?.records ?? []) as Array<
+            Record<string, unknown>
+          >).map((r) => String(r.materialId)),
+        );
+        const uncovered = lowRecords.filter(
+          (r) => !draftedMaterials.has(String(r.materialId)) && Number(r.inboundQty || 0) === 0,
+        );
+        const outcome =
+          uncovered.length === 0
+            ? `Effective: all ${lowRecords.length} low position(s) are covered by drafts or inbound supply.`
+            : `Partially effective: ${uncovered.length} position(s) still uncovered (${uncovered
+                .map((r) => r.materialId)
+                .join(', ')}).`;
+
+        await this.db.query('UPDATE agent_runs SET outcome = $1, outcome_checked_at = NOW() WHERE id = $2', [
+          outcome,
+          run.id,
+        ]);
+        await this.addStep(run.id, 'outcome', `Outcome check: ${outcome}`, uncovered.length === 0 ? 'ok' : 'failed');
+        await this.recordEpisode(`wh:${run.warehouse_id}`, `Replenishment run outcome — ${outcome}`);
+      } catch (error) {
+        this.logger.warn(`Outcome check failed for run ${run.id}: ${error instanceof Error ? error.message : '?'}`);
+      }
+    }
+  }
+
+  /** EPISODIC MEMORY (beta): short keyed summaries of what happened. */
+  async recordEpisode(scopeKey: string, summary: string) {
+    await this.db.query('INSERT INTO episodic_memory(scope_key, summary) VALUES($1, $2)', [scopeKey, summary]);
+  }
+
+  async recallEpisodes(scopeKeys: string[], limit = 3): Promise<string[]> {
+    if (scopeKeys.length === 0) {
+      return [];
+    }
+    const rows = await this.db.query<{ summary: string; created_at: string }>(
+      `SELECT summary, created_at FROM episodic_memory WHERE scope_key = ANY($1)
+       ORDER BY created_at DESC LIMIT $2`,
+      [scopeKeys, limit],
+    );
+    return rows.rows.map((r) => `[${String(r.created_at).slice(0, 10)}] ${r.summary}`);
   }
 
   /** Called by the approval flow when a run-linked action was executed. */
@@ -304,6 +496,7 @@ export class AgentsService {
     await this.addStep(runId, 'act', `${count} draft(s) executed after approval by ${approverName} (${executedQty} units).`, 'ok');
     await this.verifyDrafts(runId, warehouseId, null);
     await this.finishRun(runId, 'completed', `Completed after human approval by ${approverName}.`);
+    await this.recordEpisode(`wh:${warehouseId}`, `Replenishment plan (${executedQty} units) approved by ${approverName} and executed.`);
   }
 
   /** VERIFY — read the PRs back from the source system before declaring success. */
@@ -337,7 +530,10 @@ export class AgentsService {
       `SELECT g.*, u.display_name
        FROM agent_goals g JOIN users u ON u.id = g.user_id
        WHERE g.active = true
-         AND (g.last_run_at IS NULL OR g.last_run_at < NOW() - INTERVAL '10 minutes')`,
+         AND (
+           (g.agent = 'replenishment' AND (g.last_run_at IS NULL OR g.last_run_at < NOW() - INTERVAL '10 minutes'))
+           OR (g.agent = 'cycle_count' AND (g.last_run_at IS NULL OR g.last_run_at < NOW() - INTERVAL '7 days'))
+         )`,
     );
 
     for (const goal of goals.rows) {

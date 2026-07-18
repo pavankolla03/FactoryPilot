@@ -523,7 +523,7 @@ function App() {
               withFeedback(async () => {
                 await client.post('/api/agents/goals', g);
                 await loadAgents();
-              }, `Goal created — the agent now watches WH ${g.warehouseId}.`)
+              }, `Goal created — the ${g.agent === 'cycle_count' ? 'cycle-count planner' : 'replenishment agent'} now watches WH ${g.warehouseId}.`)
             }
             onToggleGoal={(id, active) =>
               withFeedback(async () => {

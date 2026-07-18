@@ -181,3 +181,15 @@ CREATE TABLE IF NOT EXISTS feedback (
 );
 
 CREATE INDEX IF NOT EXISTS idx_agent_runs_user ON agent_runs (user_id, started_at DESC);
+
+ALTER TABLE agent_runs ADD COLUMN IF NOT EXISTS outcome TEXT;
+ALTER TABLE agent_runs ADD COLUMN IF NOT EXISTS outcome_checked_at TIMESTAMP;
+
+CREATE TABLE IF NOT EXISTS episodic_memory (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  scope_key TEXT NOT NULL,
+  summary TEXT NOT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_episodic_scope ON episodic_memory (scope_key, created_at DESC);

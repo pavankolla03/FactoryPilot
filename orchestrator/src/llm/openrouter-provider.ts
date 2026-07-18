@@ -141,14 +141,20 @@ export class OpenRouterProvider implements ILLMProvider {
 
   async complete(messages: LlmChatMessage[], tools: LlmToolDefinition[]): Promise<LlmCompletionResult> {
     return this.withFallback(isSimpleQuery(messages), async (model) => {
+      const toolParams =
+        tools.length > 0
+          ? {
+              tools: tools.map((tool) => ({
+                type: 'function' as const,
+                function: { name: tool.name, description: tool.description, parameters: tool.inputSchema },
+              })),
+              tool_choice: 'auto' as const,
+            }
+          : {};
       const response = await this.client.chat.completions.create({
         model,
         messages: toOpenAIMessages(messages),
-        tools: tools.map((tool) => ({
-          type: 'function' as const,
-          function: { name: tool.name, description: tool.description, parameters: tool.inputSchema },
-        })),
-        tool_choice: 'auto',
+        ...toolParams,
         temperature: Number(process.env.LLM_TEMPERATURE ?? 0),
       });
 

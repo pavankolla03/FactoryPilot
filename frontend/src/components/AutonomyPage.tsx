@@ -3,6 +3,7 @@ import { EmptyState, Icon, paths } from './ui';
 
 export type AgentGoal = {
   id: string;
+  agent: string;
   warehouse_id: string;
   threshold: number;
   autonomy: 'observe' | 'propose' | 'act';
@@ -13,6 +14,8 @@ export type AgentGoal = {
 
 export type AgentRun = {
   id: string;
+  agent: string;
+  outcome: string | null;
   warehouse_id: string;
   goal_text: string;
   status: string;
@@ -32,6 +35,8 @@ const STATUS_STYLE: Record<string, string> = {
 };
 
 const STEP_ICON: Record<string, string> = {
+  critic: paths.users,
+  outcome: paths.check,
   observe: paths.chart,
   plan: paths.logs,
   act: paths.bolt,
@@ -50,11 +55,12 @@ export function AutonomyPage({
 }: {
   goals: AgentGoal[];
   runs: AgentRun[];
-  onCreateGoal: (g: { warehouseId: string; threshold: number; autonomy: string; dailyBudgetQty: number }) => Promise<void>;
+  onCreateGoal: (g: { warehouseId: string; threshold: number; autonomy: string; dailyBudgetQty: number; agent: string }) => Promise<void>;
   onToggleGoal: (id: string, active: boolean) => Promise<void>;
   onRunNow: (warehouseId: string, goalId?: string) => Promise<void>;
 }) {
   const [warehouseId, setWarehouseId] = useState('1030');
+  const [agentType, setAgentType] = useState('replenishment');
   const [threshold, setThreshold] = useState('50');
   const [autonomy, setAutonomy] = useState('propose');
   const [budget, setBudget] = useState('200');
@@ -63,7 +69,10 @@ export function AutonomyPage({
   return (
     <div className="grid items-start gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)]">
       <section className="card p-5">
-        <h3 className="text-sm font-semibold text-fp-ink">Standing goals</h3>
+        <h3 className="flex items-center gap-2 text-sm font-semibold text-fp-ink">
+          Standing goals
+          <span className="chip bg-fp-accent-soft text-fp-accent-dark">Beta</span>
+        </h3>
         <p className="mb-4 text-xs text-fp-ink-3">
           The agent checks every active goal each 15 minutes — and immediately when a stock alert fires. The toggle is
           your kill switch.
@@ -72,6 +81,10 @@ export function AutonomyPage({
         <div className="mb-4 rounded-2xl border border-fp-line p-3.5">
           <div className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-fp-ink-3">New goal</div>
           <div className="flex flex-wrap items-center gap-2">
+            <select className="input !w-44 py-2 text-xs" value={agentType} onChange={(e) => setAgentType(e.target.value)}>
+              <option value="replenishment">Replenishment agent</option>
+              <option value="cycle_count">Cycle-count planner</option>
+            </select>
             <select className="input !w-32 py-2 text-xs" value={warehouseId} onChange={(e) => setWarehouseId(e.target.value)}>
               {WAREHOUSES.map((w) => (
                 <option key={w} value={w}>
@@ -104,6 +117,7 @@ export function AutonomyPage({
                   threshold: Number(threshold) || 50,
                   autonomy,
                   dailyBudgetQty: Number(budget) || 200,
+                  agent: agentType,
                 })
               }
             >
@@ -126,6 +140,7 @@ export function AutonomyPage({
                 <div className="flex items-center justify-between gap-2">
                   <div className="flex items-center gap-2">
                     <span className="text-sm font-semibold text-fp-ink">WH {g.warehouse_id}</span>
+                    <span className="chip bg-fp-navy text-white">{g.agent === 'cycle_count' ? 'cycle count' : 'replenish'}</span>
                     <span className="chip bg-fp-bg text-fp-ink-2">above {g.threshold}</span>
                     <span
                       className={`chip ${
@@ -165,7 +180,10 @@ export function AutonomyPage({
       </section>
 
       <section className="card p-5">
-        <h3 className="text-sm font-semibold text-fp-ink">Agent runs</h3>
+        <h3 className="flex items-center gap-2 text-sm font-semibold text-fp-ink">
+          Agent runs
+          <span className="chip bg-fp-accent-soft text-fp-accent-dark">Beta</span>
+        </h3>
         <p className="mb-4 text-xs text-fp-ink-3">
           Every run is a persisted plan → execute → verify episode. Click a run to see its full timeline.
         </p>
@@ -220,6 +238,17 @@ export function AutonomyPage({
                     {run.summary && (
                       <div className="mt-3 rounded-xl bg-fp-surface px-3 py-2 text-xs font-medium text-fp-ink">
                         {run.summary}
+                      </div>
+                    )}
+                    {run.outcome && (
+                      <div
+                        className={`mt-2 rounded-xl px-3 py-2 text-xs font-medium ${
+                          run.outcome.startsWith('Effective')
+                            ? 'bg-fp-good-soft text-fp-good'
+                            : 'bg-fp-warn-soft text-fp-warn'
+                        }`}
+                      >
+                        Outcome: {run.outcome}
                       </div>
                     )}
                   </div>

@@ -213,6 +213,13 @@ export class ChatService {
     const preferenceNote = Object.keys(preferences).length
       ? ` Known user preferences (apply as defaults unless overridden): ${JSON.stringify(preferences)}.`
       : '';
+
+    // Episodic memory (beta): recall recent history for warehouses in play.
+    const mentionedWarehouses = [...new Set([...(message.match(/\b10[1-5]0\b/g) || []), preferences.default_warehouse].filter(Boolean))];
+    const episodes = await this.agents.recallEpisodes(mentionedWarehouses.map((w) => `wh:${w}`));
+    const episodeNote = episodes.length
+      ? ` Relevant recent history: ${episodes.join(' | ')}`
+      : '';
     const systemPrompt =
       "You are Otto, FactoryPilot's warehouse copilot for SAP manufacturing. " +
       'Style: open with a one-sentence direct answer, then add structure only when it helps — markdown tables for records, ' +
@@ -223,7 +230,8 @@ export class ChatService {
       'Invoke tools ONLY through the function-calling mechanism; never print a JSON tool call as text. ' +
       'Copy parameter values exactly as the user stated them (e.g. location names like "packing" or "shipping"). ' +
       'You can create stock alerts (createStockAlert) when the user asks to be notified about stock levels.' +
-      preferenceNote;
+      preferenceNote +
+      episodeNote;
 
     const conversationHistory = await this.getConversationMessages(convId);
     const llmMessages: LlmChatMessage[] = [{ role: 'system', content: systemPrompt }, ...conversationHistory];
@@ -383,6 +391,7 @@ export class ChatService {
               JSON.stringify({ userId: user.id, action }),
             );
             this.realtime.emitPendingAction(user.id, action);
+            void this.agents.announceApproval(user.id, action);
 
             const assistantText =
               writeCalls.length === 1

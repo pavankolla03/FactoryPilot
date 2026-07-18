@@ -1,8 +1,12 @@
-import { Body, Controller, Get, Headers, Param, Patch, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Headers, Param, Patch, Post, Query, Res, UseGuards } from '@nestjs/common';
+import type { Response } from 'express';
 import { z } from 'zod';
+import jwt from 'jsonwebtoken';
 import { AuthGuard, CurrentUser } from '../auth/auth.guard';
+import { AdminGuard } from '../auth/roles.guard';
 import type { AuthUser } from '../common/types';
 import { AgentsService } from './agents.service';
+import { ChatService } from '../chat/chat.service';
 import { DbService } from '../common/db.service';
 import { scopeDenied, throwApiError } from '../common/errors';
 
@@ -11,6 +15,7 @@ const goalSchema = z.object({
   threshold: z.number().int().positive().optional(),
   autonomy: z.enum(['observe', 'propose', 'act']).optional(),
   dailyBudgetQty: z.number().int().positive().optional(),
+  agent: z.enum(['replenishment', 'cycle_count']).optional(),
 });
 
 const goalPatchSchema = z.object({
@@ -24,6 +29,7 @@ const goalPatchSchema = z.object({
 export class AgentsController {
   constructor(
     private readonly agents: AgentsService,
+    private readonly chatService: ChatService,
     private readonly db: DbService,
   ) {}
 
@@ -101,6 +107,65 @@ export class AgentsController {
       parsed.comment ?? null,
     ]);
     return { success: true };
+  }
+
+  /** Admin: run outcome checks now (demo / testing). */
+  @Post('/admin/run-outcome-checks')
+  @UseGuards(AuthGuard, AdminGuard)
+  async runOutcomes() {
+    await this.agents.checkOutcomes();
+    return { success: true };
+  }
+
+  /**
+   * One-click approval from webhook channels (beta). The signed token binds
+   * the action to its owner; maker-checker still blocks self-approval.
+   */
+  @Get('/approvals/quick')
+  async quickApprove(@Query('token') token: string, @Res() res: Response) {
+    const page = (title: string, body: string, ok: boolean) =>
+      res
+        .status(ok ? 200 : 400)
+        .send(
+          `<body style="font-family:system-ui;display:grid;place-items:center;height:95vh;background:#F6F8FB">` +
+            `<div style="text-align:center;max-width:420px"><h2>${ok ? '✅' : '⚠️'} ${title}</h2><p style="color:#47586E">${body}</p></div></body>`,
+        );
+
+    try {
+      const secret = process.env.AUTH_JWT_SECRET || process.env.MOCK_JWT_SECRET || 'dev-secret';
+      const payload = jwt.verify(token || '', secret) as { actionId: string; sub: string; purpose: string };
+      if (payload.purpose !== 'quick-approve') {
+        return page('Invalid link', 'This approval link is not valid.', false);
+      }
+
+      const row = await this.db.query<{ id: string; email: string; display_name: string; role: 'admin' | 'viewer' }>(
+        'SELECT id, email, display_name, role FROM users WHERE id = $1',
+        [payload.sub],
+      );
+      const dbUser = row.rows[0];
+      if (!dbUser) {
+        return page('Unknown user', 'The approving user no longer exists.', false);
+      }
+      const scopes = await this.db.query<{ warehouse_id: string; access_level: 'read' | 'write' }>(
+        'SELECT warehouse_id, access_level FROM user_scopes WHERE user_id = $1',
+        [dbUser.id],
+      );
+      const user: AuthUser = {
+        id: dbUser.id,
+        email: dbUser.email,
+        displayName: dbUser.display_name,
+        role: dbUser.role,
+        scopes: scopes.rows.map((s) => ({ warehouseId: s.warehouse_id, accessLevel: s.access_level })),
+      };
+
+      await this.chatService.confirmAction(user, payload.actionId);
+      return page('Approved', 'The operation was executed. You can close this tab.', true);
+    } catch (error) {
+      const reason =
+        (error as { response?: { error?: { message?: string } } }).response?.error?.message ||
+        (error instanceof Error ? error.message : 'approval failed');
+      return page('Not approved', reason, false);
+    }
   }
 
   /**
