@@ -74,6 +74,10 @@ export class RealtimeGateway implements OnGatewayConnection {
     this.server.to(`user:${userId}`).emit('notification:new', payload);
   }
 
+  emitAgentRun(userId: string, payload: unknown) {
+    this.server.to(`user:${userId}`).to('admin').emit('agent_run:update', payload);
+  }
+
   emitSessionLog(payload: unknown) {
     const row = payload as { user_id: string };
     this.server.to(`user:${row.user_id}`).emit('session_log:new', payload);

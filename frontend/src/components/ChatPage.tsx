@@ -49,6 +49,7 @@ export function ChatPage({
   onSuggestion,
   onOpenConversation,
   onNewChat,
+  onFeedback,
 }: {
   displayName: string;
   chatTurns: ChatTurn[];
@@ -62,6 +63,7 @@ export function ChatPage({
   onSuggestion: (v: string) => void;
   onOpenConversation: (id: string) => void;
   onNewChat: () => void;
+  onFeedback: (rating: 1 | -1) => void;
 }) {
   const { t } = useI18n();
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -150,6 +152,22 @@ export function ChatPage({
                         {turn.grounded === false && (
                           <span className="chip bg-fp-warn-soft text-fp-warn">No data source consulted</span>
                         )}
+                        <span className="ml-1 flex items-center gap-0.5">
+                          <button
+                            className="rounded-md px-1 text-[13px] opacity-40 transition hover:opacity-100"
+                            title="Good answer"
+                            onClick={() => onFeedback(1)}
+                          >
+                            👍
+                          </button>
+                          <button
+                            className="rounded-md px-1 text-[13px] opacity-40 transition hover:opacity-100"
+                            title="Bad answer"
+                            onClick={() => onFeedback(-1)}
+                          >
+                            👎
+                          </button>
+                        </span>
                       </div>
                     )}
                   </div>

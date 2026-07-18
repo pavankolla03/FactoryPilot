@@ -11,6 +11,7 @@ import { QuotaService } from '../quota/quota.service';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
 import { RedisService } from '../common/redis.service';
 import { AlertsService } from '../alerts/alerts.service';
+import { AgentsService } from '../agents/agents.service';
 import type { NormalizedToolCall } from '../llm/types';
 
 const WRITE_TOOLS = new Set(['moveStock', 'draftPurchaseRequisition', 'receivePurchaseOrder', 'adjustStock']);
@@ -92,6 +93,36 @@ const LOCAL_TOOLS = [
     },
   },
   {
+    name: 'createReplenishmentGoal',
+    description:
+      "Create a standing autonomous replenishment goal: the agent will continuously watch a warehouse and keep stock above the threshold. autonomy is 'observe' (report only), 'propose' (draft orders for approval — default), or 'act' (auto-draft within the daily budget). Use when the user asks to keep a warehouse stocked automatically.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        warehouseId: { type: 'string' },
+        threshold: { type: 'number' },
+        autonomy: { type: 'string', enum: ['observe', 'propose', 'act'] },
+        dailyBudgetQty: { type: 'number' },
+      },
+      required: ['warehouseId'],
+    },
+  },
+  {
+    name: 'startReplenishmentRun',
+    description:
+      'Start a replenishment agent run for a warehouse right now: it observes low stock, plans reorders, acts per policy, and verifies the result. Use when the user asks to run replenishment or check-and-reorder now.',
+    inputSchema: {
+      type: 'object',
+      properties: { warehouseId: { type: 'string' } },
+      required: ['warehouseId'],
+    },
+  },
+  {
+    name: 'listAgentRuns',
+    description: "List recent autonomous agent runs with their status and outcome.",
+    inputSchema: { type: 'object', properties: {} },
+  },
+  {
     name: 'getShiftHandover',
     description:
       'Build a shift-handover summary for a warehouse: movements in the last 24h, current low-stock positions, and triggered alerts. Use when the user asks for a handover, daily summary, or what happened today.',
@@ -116,6 +147,7 @@ export class ChatService {
     private readonly quota: QuotaService,
     private readonly realtime: RealtimeGateway,
     private readonly alerts: AlertsService,
+    private readonly agents: AgentsService,
   ) {}
 
   async getUsage(userId: string) {
@@ -512,6 +544,12 @@ export class ChatService {
       latencyMs: 0,
     });
 
+    if (payload.action.runId) {
+      const executedQty = steps.reduce((sum, s) => sum + Number(s.params.qty || 0), 0);
+      const warehouseId = String(steps[0]?.params.warehouseId || '');
+      await this.agents.onActionExecuted(payload.action.runId, user.displayName, warehouseId, executedQty, steps.length);
+    }
+
     return { success: true, actionId, result: steps.length === 1 ? results[0] : { steps: results } };
   }
 
@@ -782,6 +820,65 @@ export class ChatService {
 
     if (name === 'deleteScheduledReport') {
       return { structuredContent: await this.alerts.deleteSchedule(user.id, String(args.scheduleId || '')) };
+    }
+
+    if (name === 'createReplenishmentGoal') {
+      this.assertScope(user, String(args.warehouseId || ''), 'write');
+      const goal = await this.agents.createGoal(user.id, {
+        warehouseId: String(args.warehouseId),
+        threshold: args.threshold !== undefined ? Number(args.threshold) : undefined,
+        autonomy: args.autonomy ? String(args.autonomy) : undefined,
+        dailyBudgetQty: args.dailyBudgetQty !== undefined ? Number(args.dailyBudgetQty) : undefined,
+      });
+      return {
+        structuredContent: {
+          created: true,
+          goal: {
+            id: goal.id,
+            warehouseId: goal.warehouse_id,
+            threshold: goal.threshold,
+            autonomy: goal.autonomy,
+            dailyBudgetQty: goal.daily_budget_qty,
+          },
+          note: 'The agent checks this goal every 15 minutes and whenever a stock alert fires. Manage it in the Autonomy tab.',
+        },
+      };
+    }
+
+    if (name === 'startReplenishmentRun') {
+      this.assertScope(user, String(args.warehouseId || ''), 'write');
+      const goals = await this.agents.listGoals(user.id);
+      const goal = goals.find((g) => g.warehouse_id === String(args.warehouseId) && g.active) ?? null;
+      const { runId } = await this.agents.startRun({
+        userId: user.id,
+        displayName: user.displayName,
+        warehouseId: String(args.warehouseId),
+        goal,
+        trigger: 'chat',
+      });
+      return {
+        structuredContent: {
+          started: true,
+          runId,
+          note: 'The run executes in the background — progress appears in the Autonomy tab in real time.',
+        },
+      };
+    }
+
+    if (name === 'listAgentRuns') {
+      const runs = (await this.agents.listRuns(user.id, user.role === 'admin')) as Array<Record<string, unknown>>;
+      return {
+        structuredContent: {
+          records: runs.slice(0, 10).map((r) => ({
+            id: r.id,
+            warehouseId: r.warehouse_id,
+            status: r.status,
+            goal: r.goal_text,
+            summary: r.summary,
+            startedAt: r.started_at,
+          })),
+        },
+      };
     }
 
     if (name === 'getShiftHandover') {

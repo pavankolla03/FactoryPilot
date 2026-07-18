@@ -74,6 +74,7 @@ export interface PendingAction {
   requestedById?: string;
   makerChecker?: boolean;
   anomaly?: { reason: string };
+  runId?: string;
 }
 
 export interface ChatRequest {

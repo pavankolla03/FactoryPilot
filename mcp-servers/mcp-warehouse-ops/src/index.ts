@@ -168,6 +168,24 @@ mcpServer.registerTool(
   );
 
   mcpServer.registerTool(
+    'getPurchaseRequisitions',
+    {
+      title: 'List draft purchase requisitions',
+      description: 'Returns draft purchase requisitions created through FactoryPilot, optionally filtered by warehouse.',
+      inputSchema: {
+        warehouseId: z.string().optional(),
+      },
+    },
+    async ({ warehouseId }) => {
+      const result = await iflowGet('/iflow/purchase-requisitions', { warehouseId });
+      return {
+        content: [{ type: 'text', text: JSON.stringify(result) }],
+        structuredContent: result,
+      };
+    },
+  );
+
+  mcpServer.registerTool(
     'getDemandTrend',
     {
       title: 'Get movement/demand trend for a warehouse',

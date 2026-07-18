@@ -2,6 +2,8 @@ import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { ScheduleModule } from '@nestjs/schedule';
 import { AdminController } from './admin/admin.controller';
+import { AgentsController } from './agents/agents.controller';
+import { AgentsService } from './agents/agents.service';
 import { AlertsController } from './alerts/alerts.controller';
 import { AlertsService } from './alerts/alerts.service';
 import { AuthModule } from './auth/auth.module';
@@ -26,6 +28,7 @@ import { RealtimeGateway } from './realtime/realtime.gateway';
     ConversationsController,
     AlertsController,
     OpsController,
+    AgentsController,
   ],
   providers: [
     DbService,
@@ -36,6 +39,7 @@ import { RealtimeGateway } from './realtime/realtime.gateway';
     QuotaService,
     RealtimeGateway,
     AlertsService,
+    AgentsService,
   ],
 })
 export class AppModule {}

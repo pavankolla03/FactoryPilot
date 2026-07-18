@@ -4,6 +4,7 @@ import { io, Socket } from 'socket.io-client';
 import type { PendingAction, SessionLogEntry } from '@manufacturing-agent/shared';
 import { Landing } from './components/Landing';
 import { ApprovalsPage, type ScheduledReport } from './components/ApprovalsPage';
+import { AutonomyPage, type AgentGoal, type AgentRun } from './components/AutonomyPage';
 import { BoardPage } from './components/BoardPage';
 import { AuthPage } from './components/AuthPages';
 import { Sidebar, type Tab } from './components/Sidebar';
@@ -67,6 +68,8 @@ function App() {
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
   const [alerts, setAlerts] = useState<StockAlert[]>([]);
   const [schedules, setSchedules] = useState<ScheduledReport[]>([]);
+  const [agentGoals, setAgentGoals] = useState<AgentGoal[]>([]);
+  const [agentRuns, setAgentRuns] = useState<AgentRun[]>([]);
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [bellOpen, setBellOpen] = useState(false);
   const bellRef = useRef<HTMLDivElement>(null);
@@ -213,6 +216,13 @@ function App() {
       setUsage((prev) => ({ ...prev, used: payload.used, limit: payload.limit }));
     });
 
+    socket.on('agent_run:update', (payload: AgentRun) => {
+      setAgentRuns((prev) => {
+        const rest = prev.filter((r) => r.id !== payload.id);
+        return [payload, ...rest].sort((a, b) => b.started_at.localeCompare(a.started_at)).slice(0, 25);
+      });
+    });
+
     socket.on('notification:new', (payload: AppNotification) => {
       setNotifications((prev) => [payload, ...prev.filter((n) => n.id !== payload.id)].slice(0, 50));
     });
@@ -233,6 +243,7 @@ function App() {
     void loadConversations();
     void loadAlerts();
     void loadNotifications();
+    void loadAgents();
     if (role === 'admin') {
       void refreshUsers();
     }
@@ -332,6 +343,12 @@ function App() {
     setSchedules(reports.data);
   }
 
+  async function loadAgents() {
+    const [goals, runs] = await Promise.all([client.get('/api/agents/goals'), client.get('/api/agents/runs')]);
+    setAgentGoals(goals.data);
+    setAgentRuns(runs.data);
+  }
+
   async function deleteAlert(id: string) {
     await client.delete(`/api/alerts/${id}`);
     await loadAlerts();
@@ -374,6 +391,7 @@ function App() {
   const pageMeta: Record<Tab, { title: string; subtitle: string }> = {
     chat: { title: t('page.chat.title'), subtitle: t('page.chat.subtitle') },
     board: { title: t('page.board.title'), subtitle: t('page.board.subtitle') },
+    autonomy: { title: t('page.autonomy.title'), subtitle: t('page.autonomy.subtitle') },
     approvals: { title: t('page.approvals.title'), subtitle: t('page.approvals.subtitle') },
     usage: { title: t('page.usage.title'), subtitle: t('page.usage.subtitle') },
     logs: { title: t('page.logs.title'), subtitle: t('page.logs.subtitle') },
@@ -486,10 +504,41 @@ function App() {
             onSuggestion={(s) => void sendChat(s)}
             onOpenConversation={(id) => void openConversation(id)}
             onNewChat={newChat}
+            onFeedback={(rating) =>
+              void client
+                .post('/api/agents/feedback', { conversationId: activeConversationId ?? undefined, rating })
+                .then(() => showToast(rating === 1 ? 'Thanks for the feedback!' : 'Noted — this helps Otto improve.'))
+                .catch(() => undefined)
+            }
           />
         )}
 
         {tab === 'board' && <BoardPage client={client} onProposed={showToast} />}
+
+        {tab === 'autonomy' && (
+          <AutonomyPage
+            goals={agentGoals}
+            runs={agentRuns}
+            onCreateGoal={(g) =>
+              withFeedback(async () => {
+                await client.post('/api/agents/goals', g);
+                await loadAgents();
+              }, `Goal created — the agent now watches WH ${g.warehouseId}.`)
+            }
+            onToggleGoal={(id, active) =>
+              withFeedback(async () => {
+                await client.patch(`/api/agents/goals/${id}`, { active });
+                await loadAgents();
+              }, active ? 'Goal activated.' : 'Goal paused (kill switch).')
+            }
+            onRunNow={(warehouseId, goalId) =>
+              withFeedback(async () => {
+                await client.post('/api/agents/run', { warehouseId, goalId });
+                await loadAgents();
+              }, 'Run started — watch the timeline update live.')
+            }
+          />
+        )}
 
         {tab === 'approvals' && (
           <ApprovalsPage

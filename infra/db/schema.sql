@@ -143,3 +143,41 @@ CREATE TABLE IF NOT EXISTS scheduled_reports (
   active BOOLEAN NOT NULL DEFAULT true,
   created_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
+
+CREATE TABLE IF NOT EXISTS agent_goals (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  agent TEXT NOT NULL DEFAULT 'replenishment',
+  warehouse_id TEXT NOT NULL,
+  threshold INT NOT NULL DEFAULT 50,
+  autonomy TEXT NOT NULL DEFAULT 'propose',
+  daily_budget_qty INT NOT NULL DEFAULT 200,
+  active BOOLEAN NOT NULL DEFAULT true,
+  created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+  last_run_at TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS agent_runs (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  goal_id UUID REFERENCES agent_goals(id) ON DELETE SET NULL,
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  agent TEXT NOT NULL,
+  warehouse_id TEXT NOT NULL,
+  goal_text TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'running',
+  steps JSONB NOT NULL DEFAULT '[]'::jsonb,
+  summary TEXT,
+  started_at TIMESTAMP NOT NULL DEFAULT NOW(),
+  finished_at TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS feedback (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  conversation_id UUID,
+  rating INT NOT NULL,
+  comment TEXT,
+  created_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_agent_runs_user ON agent_runs (user_id, started_at DESC);

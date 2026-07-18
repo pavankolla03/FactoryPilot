@@ -8,6 +8,7 @@ import type { McpService } from '../mcp/mcp.service';
 import type { QuotaService } from '../quota/quota.service';
 import type { RealtimeGateway } from '../realtime/realtime.gateway';
 import type { AlertsService } from '../alerts/alerts.service';
+import type { AgentsService } from '../agents/agents.service';
 import type { AuthUser } from '../common/types';
 
 interface StoredMessage {
@@ -127,7 +128,15 @@ function buildFakes() {
     listAlerts: async () => [],
   } as unknown as AlertsService;
 
-  return { db, redis, providerFactory, mcp, quota, realtime, alerts, providerRounds, sessionLogs, messages };
+  const agentsSvc = {
+    createGoal: async () => ({ id: 'g1', warehouse_id: '1010', threshold: 50, autonomy: 'propose', daily_budget_qty: 200 }),
+    listGoals: async () => [],
+    listRuns: async () => [],
+    startRun: async () => ({ runId: 'r1' }),
+    onActionExecuted: async () => undefined,
+  } as unknown as AgentsService;
+
+  return { db, redis, providerFactory, mcp, quota, realtime, alerts, agentsSvc, providerRounds, sessionLogs, messages };
 }
 
 const user: AuthUser = {
@@ -149,6 +158,7 @@ describe('agent loop', () => {
       fakes.quota,
       fakes.realtime,
       fakes.alerts,
+      fakes.agentsSvc,
     );
 
     const response = await service.chat(user, undefined, 'how much MAT-1 in 1010?');
@@ -179,6 +189,7 @@ describe('agent loop', () => {
       fakes.quota,
       fakes.realtime,
       fakes.alerts,
+      fakes.agentsSvc,
     );
 
     await service.chat(user, undefined, 'how much MAT-1 in 1010?');

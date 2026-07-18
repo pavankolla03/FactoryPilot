@@ -3,6 +3,7 @@ import { Cron, CronExpression } from '@nestjs/schedule';
 import { DbService } from '../common/db.service';
 import { McpService } from '../mcp/mcp.service';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
+import { AgentsService } from '../agents/agents.service';
 import { validationError } from '../common/errors';
 import type { AuthUser } from '../common/types';
 
@@ -26,6 +27,7 @@ export class AlertsService {
     private readonly db: DbService,
     private readonly mcp: McpService,
     private readonly realtime: RealtimeGateway,
+    private readonly agents: AgentsService,
   ) {}
 
   async createAlert(user: AuthUser, warehouseId: string, materialId: string, threshold: number) {
@@ -102,6 +104,11 @@ export class AlertsService {
             `Low stock: ${alert.material_id}`,
             `Stock for ${alert.material_id} in warehouse ${alert.warehouse_id} dropped to ${total} (threshold ${alert.threshold}).`,
           );
+          // Event-driven autonomy: a firing alert starts the warehouse's replenishment run.
+          const triggered = await this.agents.triggerForWarehouse(alert.warehouse_id, 'alert');
+          if (triggered.started) {
+            this.logger.log(`Alert triggered replenishment run ${triggered.runId} for WH ${alert.warehouse_id}`);
+          }
         } else if (total >= alert.threshold && alert.triggered) {
           await this.db.query('UPDATE stock_alerts SET triggered = false WHERE id = $1', [alert.id]);
           await this.notify(

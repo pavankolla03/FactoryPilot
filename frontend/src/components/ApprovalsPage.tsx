@@ -169,9 +169,12 @@ export function ApprovalCard({
         <div className="text-sm font-semibold text-fp-ink">
           {action.tool === 'batch' ? `${steps.length} ${t('approvals.steps')}` : prettyTool(action.tool)}
         </div>
-        <div className="mt-0.5 text-xs text-fp-ink-3">
-          {t('approvals.requires')}
-          {action.requestedBy ? ` · requested by ${action.requestedBy}` : ''}
+        <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs text-fp-ink-3">
+          <span>
+            {t('approvals.requires')}
+            {action.requestedBy ? ` · requested by ${action.requestedBy}` : ''}
+          </span>
+          {action.runId && <span className="chip bg-fp-accent-soft text-fp-accent-dark">agent run</span>}
         </div>
       </div>
 
