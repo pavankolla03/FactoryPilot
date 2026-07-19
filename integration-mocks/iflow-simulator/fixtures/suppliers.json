@@ -1,0 +1,38 @@
+[
+  {
+    "supplierId": "SUP-10001",
+    "name": "Rheinwerk Metallbau GmbH",
+    "city": "Düsseldorf",
+    "country": "DE",
+    "leadTimeDays": 11,
+    "onTimeRatePct": 92,
+    "contact": "orders@rheinwerk-metallbau.example"
+  },
+  {
+    "supplierId": "SUP-10002",
+    "name": "Precision Jig Works",
+    "city": "Brno",
+    "country": "CZ",
+    "leadTimeDays": 9,
+    "onTimeRatePct": 78,
+    "contact": "sales@precisionjig.example"
+  },
+  {
+    "supplierId": "SUP-10003",
+    "name": "Nordbolt Fasteners AB",
+    "city": "Göteborg",
+    "country": "SE",
+    "leadTimeDays": 6,
+    "onTimeRatePct": 97,
+    "contact": "dispatch@nordbolt.example"
+  },
+  {
+    "supplierId": "SUP-10004",
+    "name": "Adriatic Polymers d.o.o.",
+    "city": "Rijeka",
+    "country": "HR",
+    "leadTimeDays": 14,
+    "onTimeRatePct": 85,
+    "contact": "export@adriaticpolymers.example"
+  }
+]

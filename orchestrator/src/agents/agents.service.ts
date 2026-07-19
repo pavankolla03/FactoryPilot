@@ -8,6 +8,7 @@ import { McpService } from '../mcp/mcp.service';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
 import { LlmProviderFactory } from '../llm/provider.factory';
 import { validationError } from '../common/errors';
+import { holtForecast, reorderPoint, toDailySeries } from './forecast';
 import jwt from 'jsonwebtoken';
 
 export interface AgentGoal {
@@ -66,8 +67,8 @@ export class AgentsService {
       validationError("autonomy must be 'observe', 'propose', or 'act'");
     }
     const agent = args.agent || 'replenishment';
-    if (!['replenishment', 'cycle_count', 'rebalance', 'po_followup'].includes(agent)) {
-      validationError("agent must be 'replenishment', 'cycle_count', 'rebalance', or 'po_followup'");
+    if (!['replenishment', 'cycle_count', 'rebalance', 'po_followup', 'forecast'].includes(agent)) {
+      validationError("agent must be 'replenishment', 'cycle_count', 'rebalance', 'po_followup', or 'forecast'");
     }
     const row = await this.db.query<AgentGoal>(
       `INSERT INTO agent_goals(user_id, agent, warehouse_id, threshold, autonomy, daily_budget_qty)
@@ -137,6 +138,8 @@ export class AgentsService {
         ? `Weekly cycle-count plan for warehouse ${options.warehouseId} (trigger: ${options.trigger})`
         : agent === 'po_followup'
           ? `Chase overdue purchase orders for warehouse ${options.warehouseId} (trigger: ${options.trigger})`
+        : agent === 'forecast'
+          ? `Weekly demand forecast + reorder points for warehouse ${options.warehouseId} (trigger: ${options.trigger})`
         : agent === 'rebalance'
           ? `Rebalance warehouse ${options.warehouseId}: feed starved downstream locations from surplus (autonomy: ${autonomy}, trigger: ${options.trigger})`
           : `Keep warehouse ${options.warehouseId} stocked above ${threshold} (autonomy: ${autonomy}, trigger: ${options.trigger})`;
@@ -155,6 +158,8 @@ export class AgentsService {
         ? this.executeCycleCount(runId, options.userId, { warehouseId: options.warehouseId })
         : agent === 'po_followup'
           ? this.executePoFollowup(runId, options.userId, options.warehouseId)
+        : agent === 'forecast'
+          ? this.executeForecast(runId, options.userId, options.warehouseId)
         : agent === 'rebalance'
           ? this.executeRebalance(runId, options.userId, options.displayName, {
               warehouseId: options.warehouseId,
@@ -222,15 +227,33 @@ export class AgentsService {
         .map((pr) => String(pr.materialId)),
     );
 
+    // Forecast-driven targets (beta, Phase I): when the forecast agent has run
+    // for this warehouse, targets come from reorder points (lead-time demand +
+    // safety stock) instead of the static 2x-threshold rule.
+    let forecastCache: {
+      forecasts?: Record<string, { reorderPoint: number; dailyDemand: number }>;
+    } | null = null;
+    try {
+      const raw = await this.redis.raw.get(`forecast:${cfg.warehouseId}`);
+      forecastCache = raw ? JSON.parse(raw) : null;
+    } catch {
+      forecastCache = null;
+    }
+
     const suggestions: Suggestion[] = [];
     const skipped: string[] = [];
+    let forecastDriven = 0;
     for (const record of lowRecords) {
       const materialId = String(record.materialId);
       const currentQty = Number(record.quantity || 0);
       const inbound = poRecords
         .filter((po) => po.materialId === materialId && po.status !== 'delivered')
         .reduce((sum, po) => sum + Number(po.qty || 0), 0);
-      const target = cfg.threshold * 2;
+      const forecast = forecastCache?.forecasts?.[materialId];
+      const target = forecast ? Math.max(forecast.reorderPoint, cfg.threshold) : cfg.threshold * 2;
+      if (forecast) {
+        forecastDriven += 1;
+      }
       const suggestedOrderQty = Math.max(target - currentQty - inbound, 0);
 
       if (suggestedOrderQty === 0) {
@@ -247,6 +270,7 @@ export class AgentsService {
       'plan',
       `Plan: ${suggestions.length} reorder(s) — ` +
         (suggestions.map((s) => `${s.materialId}: order ${s.suggestedOrderQty}`).join(', ') || 'none') +
+        (forecastDriven > 0 ? ` [forecast-driven targets for ${forecastDriven} material(s)]` : '') +
         (skipped.length ? `. Skipped: ${skipped.join('; ')}` : ''),
       'ok',
     );
@@ -516,6 +540,93 @@ export class AgentsService {
   }
 
   /**
+   * FORECAST AGENT (beta, Phase I): Holt-smoothed per-material demand forecast
+   * from 14 days of live movement history, plus safety stock and reorder
+   * points at ~95% service level. Results are cached per warehouse and picked
+   * up by the replenishment agent, whose targets become forecast-driven.
+   */
+  private async executeForecast(runId: string, userId: string, warehouseId: string) {
+    const [trend, suppliers] = await Promise.all([
+      this.mcp.callTool('getDemandTrend', { warehouseId, days: 14, byProduct: true }),
+      this.mcp.callTool('getSuppliers', {}),
+    ]);
+    const trendRecords = ((trend.structuredContent as { records?: Array<Record<string, unknown>> })?.records ??
+      []) as Array<Record<string, unknown>>;
+    const supplierRecords = ((suppliers.structuredContent as { records?: Array<Record<string, unknown>> })?.records ??
+      []) as Array<Record<string, unknown>>;
+    const leadTimes = supplierRecords.map((s) => Number(s.leadTimeDays || 0)).filter((v) => v > 0);
+    const leadTimeDays = leadTimes.length ? Math.round(leadTimes.reduce((a, b) => a + b, 0) / leadTimes.length) : 10;
+
+    await this.addStep(
+      runId,
+      'observe',
+      `Observed ${trendRecords.length} daily demand point(s) over 14 days; supplier avg lead time ${leadTimeDays}d.`,
+      'ok',
+    );
+
+    // Bucket per material.
+    const byMaterial = new Map<string, Array<{ date: string; qty: number }>>();
+    for (const r of trendRecords) {
+      const mat = String(r.materialId || r.productId || '');
+      if (!mat) {
+        continue;
+      }
+      const list = byMaterial.get(mat) ?? [];
+      list.push({ date: String(r.day), qty: Number(r.totalQty || 0) });
+      byMaterial.set(mat, list);
+    }
+
+    if (byMaterial.size === 0) {
+      await this.finishRun(runId, 'completed', 'No demand history in the last 14 days — nothing to forecast.');
+      return;
+    }
+
+    const forecasts: Record<
+      string,
+      { dailyDemand: number; trendPerDay: number; horizonDemand: number; safetyStock: number; reorderPoint: number; mapePct: number | null }
+    > = {};
+    for (const [materialId, records] of byMaterial) {
+      const series = toDailySeries(records, 14);
+      const f = holtForecast(series, 14);
+      const rp = reorderPoint(f, leadTimeDays);
+      forecasts[materialId] = {
+        dailyDemand: f.dailyDemand,
+        trendPerDay: f.trendPerDay,
+        horizonDemand: f.horizonDemand,
+        safetyStock: rp.safetyStock,
+        reorderPoint: rp.reorderPoint,
+        mapePct: f.mapePct,
+      };
+    }
+
+    const summaryLines = Object.entries(forecasts)
+      .sort((a, b) => b[1].dailyDemand - a[1].dailyDemand)
+      .map(
+        ([mat, f]) =>
+          `${mat}: ~${f.dailyDemand}/day${f.trendPerDay > 0.5 ? ' ↑' : f.trendPerDay < -0.5 ? ' ↓' : ''}, reorder at ${f.reorderPoint} (safety ${f.safetyStock}${f.mapePct !== null ? `, MAPE ${f.mapePct}%` : ''})`,
+      );
+    await this.addStep(runId, 'plan', `Forecasts for ${byMaterial.size} material(s): ${summaryLines.join('; ').slice(0, 700)}`, 'ok');
+
+    // 7-day cache; the replenishment agent reads this to set forecast-driven targets.
+    await this.redis.raw.setEx(
+      `forecast:${warehouseId}`,
+      7 * 86400,
+      JSON.stringify({ leadTimeDays, generatedAt: new Date().toISOString(), forecasts }),
+    );
+    await this.addStep(runId, 'act', `Reorder points cached for the replenishment agent (7-day validity).`, 'ok');
+    await this.finishRun(runId, 'completed', `Forecasted ${byMaterial.size} material(s); replenishment targets are now forecast-driven.`);
+    await this.notifyOwner(
+      userId,
+      `Demand forecast — WH ${warehouseId}`,
+      summaryLines.slice(0, 6).join('\n'),
+    );
+    await this.recordEpisode(
+      `${await this.orgScopePrefix(userId)}wh:${warehouseId}`,
+      `Demand forecast: ${summaryLines.slice(0, 3).join('; ')}.`,
+    );
+  }
+
+  /**
    * PO FOLLOW-UP AGENT (beta, Phase G): finds purchase orders past their
    * expected delivery date and drafts supplier chase messages. Read-only —
    * output is a notification/webhook, never a write.
@@ -653,6 +764,19 @@ export class AgentsService {
       [userId],
     );
     const total = Number(cacheStats.rows[0]?.total || 0);
+    // Measured model quality (beta, Phase K): grounded/answered rate per model.
+    const models = [] as Array<Record<string, unknown>>;
+    for (const m of modelStats.rows as Array<{ model_used: string; calls: number; tokens: number }>) {
+      let quality: number | null = null;
+      try {
+        const q = await this.redis.raw.hGetAll(`model:quality:${m.model_used}`);
+        const qTotal = Number(q.total || 0);
+        quality = qTotal >= 3 ? Math.round((Number(q.ok || 0) / qTotal) * 100) : null;
+      } catch {
+        quality = null;
+      }
+      models.push({ ...m, qualityPct: quality });
+    }
     return {
       dependencies: {
         postgres: { ok: true, ms: dbMs },
@@ -661,7 +785,7 @@ export class AgentsService {
       },
       runs: { avgMs: Number(runStats.rows[0]?.avg_ms || 0), p95Ms: Number(runStats.rows[0]?.p95_ms || 0) },
       cacheHitRate: total ? Math.round((Number(cacheStats.rows[0].hits) / total) * 100) : null,
-      models: modelStats.rows,
+      models,
     };
   }
 

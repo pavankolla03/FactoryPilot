@@ -15,12 +15,27 @@ export class IflowState {
   stocks: StockRecord[];
   movements: MovementRecord[];
   purchaseOrders: PurchaseOrder[];
+  productionOrders: Array<Record<string, unknown>>;
+  suppliers: Array<Record<string, unknown>>;
 
   constructor() {
     this.materials = readFixture<Material[]>('materials.json');
     this.stocks = readFixture<StockRecord[]>('stocks.json');
     this.movements = readFixture<MovementRecord[]>('movements.json');
     this.purchaseOrders = readFixture<PurchaseOrder[]>('purchase-orders.json');
+    this.productionOrders = readFixture<Array<Record<string, unknown>>>('production-orders.json');
+    // Movement fixtures carry daysAgo/hourOfDay instead of absolute dates so the
+    // 14-day demand history is always anchored to "now" and never ages out.
+    for (const m of this.movements as unknown as Array<Record<string, unknown>>) {
+      if (typeof m.daysAgo === 'number') {
+        const ts = new Date(Date.now() - m.daysAgo * 86_400_000);
+        ts.setUTCHours(typeof m.hourOfDay === 'number' ? m.hourOfDay : 12, 0, 0, 0);
+        m.timestamp = ts.toISOString();
+        delete m.daysAgo;
+        delete m.hourOfDay;
+      }
+    }
+    this.suppliers = readFixture<Array<Record<string, unknown>>>('suppliers.json');
   }
 
   searchMaterials(query: string): Array<Material & { totalStock: number }> {
@@ -158,22 +173,30 @@ export class IflowState {
     return { previousQty, newQty: args.targetQty, delta, movement: delta !== 0 ? movement : null };
   }
 
-  getDemandTrend(warehouseId: string, days: number) {
+  getDemandTrend(warehouseId: string, days: number, byProduct = false) {
     const minTime = Date.now() - days * 24 * 60 * 60 * 1000;
-    const byDay = new Map<string, { moves: number; totalQty: number }>();
-    for (const m of this.movements) {
+    const byKey = new Map<string, { day: string; productId?: string; materialId?: string; moves: number; totalQty: number }>();
+    for (const m of this.movements as unknown as Array<Record<string, unknown> & { warehouseId: string; timestamp: string; qty: number }>) {
       if (m.warehouseId !== warehouseId || new Date(m.timestamp).getTime() < minTime) {
         continue;
       }
+      // Only demand-shaped moves (into shipping) count toward the trend when
+      // grouping per product — putaways are not demand.
+      if (byProduct && m.toLocation !== 'shipping') {
+        continue;
+      }
       const day = m.timestamp.slice(0, 10);
-      const entry = byDay.get(day) || { moves: 0, totalQty: 0 };
+      const key = byProduct ? `${day}|${m.productId}` : day;
+      const entry =
+        byKey.get(key) ||
+        (byProduct
+          ? { day, productId: String(m.productId), materialId: m.materialId ? String(m.materialId) : undefined, moves: 0, totalQty: 0 }
+          : { day, moves: 0, totalQty: 0 });
       entry.moves += 1;
       entry.totalQty += m.qty;
-      byDay.set(day, entry);
+      byKey.set(key, entry);
     }
-    return [...byDay.entries()]
-      .map(([day, v]) => ({ day, ...v }))
-      .sort((a, b) => a.day.localeCompare(b.day));
+    return [...byKey.values()].sort((a, b) => a.day.localeCompare(b.day));
   }
 
   getPurchaseOrders(warehouseId?: string, status?: string): PurchaseOrder[] {

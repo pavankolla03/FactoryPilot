@@ -158,6 +158,43 @@ function buildServer(): McpServer {
     },
   );
 
+  mcpServer.registerTool(
+    'getProductionOrders',
+    {
+      title: 'List production orders for a warehouse',
+      description:
+        'Returns production orders (planned, in_progress, completed) with planned vs confirmed quantities, work center, and start/end dates',
+      inputSchema: {
+        warehouseId: z.string(),
+        status: z.enum(['planned', 'in_progress', 'completed']).optional(),
+      },
+    },
+    async ({ warehouseId, status }) => {
+      const result = await iflowGet('/iflow/production-orders', { warehouseId, status });
+      return {
+        content: [{ type: 'text', text: JSON.stringify(result) }],
+        structuredContent: result,
+      };
+    },
+  );
+
+  mcpServer.registerTool(
+    'getSuppliers',
+    {
+      title: 'List supplier master data',
+      description:
+        'Returns supplier master records with lead time in days, on-time delivery rate, location, and contact — useful for judging reorder urgency and chasing overdue POs',
+      inputSchema: {},
+    },
+    async () => {
+      const result = await iflowGet('/iflow/suppliers', {});
+      return {
+        content: [{ type: 'text', text: JSON.stringify(result) }],
+        structuredContent: result,
+      };
+    },
+  );
+
   return mcpServer;
 }
 

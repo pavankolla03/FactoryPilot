@@ -194,10 +194,15 @@ mcpServer.registerTool(
       inputSchema: {
         warehouseId: z.string(),
         days: z.coerce.number().int().positive().max(90).optional(),
+        byProduct: z.coerce.boolean().optional(),
       },
     },
-    async ({ warehouseId, days }) => {
-      const result = await iflowGet('/iflow/demand-trend', { warehouseId, days });
+    async ({ warehouseId, days, byProduct }) => {
+      const result = await iflowGet('/iflow/demand-trend', {
+        warehouseId,
+        days,
+        ...(byProduct ? { byProduct: '1' } : {}),
+      });
       return {
         content: [{ type: 'text', text: JSON.stringify(result) }],
         structuredContent: result,

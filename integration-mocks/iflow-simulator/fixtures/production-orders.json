@@ -1,0 +1,74 @@
+[
+  {
+    "orderNumber": "PRD-1000101",
+    "materialId": "MAT-10023456",
+    "productId": "P123",
+    "warehouseId": "1010",
+    "plannedQty": 150,
+    "confirmedQty": 90,
+    "status": "in_progress",
+    "workCenter": "WC-ASSEMBLY-01",
+    "startDate": "2026-07-15",
+    "endDate": "2026-07-24"
+  },
+  {
+    "orderNumber": "PRD-1000102",
+    "materialId": "MAT-10023461",
+    "productId": "P128",
+    "warehouseId": "1020",
+    "plannedQty": 200,
+    "confirmedQty": 200,
+    "status": "completed",
+    "workCenter": "WC-MILLING-02",
+    "startDate": "2026-07-08",
+    "endDate": "2026-07-17"
+  },
+  {
+    "orderNumber": "PRD-1000103",
+    "materialId": "MAT-10023465",
+    "productId": "P132",
+    "warehouseId": "1030",
+    "plannedQty": 120,
+    "confirmedQty": 30,
+    "status": "in_progress",
+    "workCenter": "WC-ASSEMBLY-01",
+    "startDate": "2026-07-18",
+    "endDate": "2026-07-27"
+  },
+  {
+    "orderNumber": "PRD-1000104",
+    "materialId": "MAT-10023470",
+    "productId": "P137",
+    "warehouseId": "1040",
+    "plannedQty": 80,
+    "confirmedQty": 0,
+    "status": "planned",
+    "workCenter": "WC-PAINT-01",
+    "startDate": "2026-07-22",
+    "endDate": "2026-07-30"
+  },
+  {
+    "orderNumber": "PRD-1000105",
+    "materialId": "MAT-10023473",
+    "productId": "P140",
+    "warehouseId": "1050",
+    "plannedQty": 300,
+    "confirmedQty": 140,
+    "status": "in_progress",
+    "workCenter": "WC-MILLING-02",
+    "startDate": "2026-07-12",
+    "endDate": "2026-07-21"
+  },
+  {
+    "orderNumber": "PRD-1000106",
+    "materialId": "MAT-10023474",
+    "productId": "P141",
+    "warehouseId": "1050",
+    "plannedQty": 60,
+    "confirmedQty": 0,
+    "status": "planned",
+    "workCenter": "WC-ASSEMBLY-01",
+    "startDate": "2026-07-23",
+    "endDate": "2026-08-01"
+  }
+]

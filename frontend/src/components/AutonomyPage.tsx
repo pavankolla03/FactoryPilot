@@ -122,6 +122,7 @@ export function AutonomyPage({
               <option value="cycle_count">Cycle-count planner</option>
               <option value="rebalance">Rebalancer (beta)</option>
               <option value="po_followup">PO follow-up (beta)</option>
+              <option value="forecast">Demand forecast (beta)</option>
             </select>
             <select className="input !w-32 py-2 text-xs" value={warehouseId} onChange={(e) => setWarehouseId(e.target.value)}>
               {WAREHOUSES.map((w) => (
@@ -179,7 +180,7 @@ export function AutonomyPage({
                   <div className="flex items-center gap-2">
                     <span className="text-sm font-semibold text-fp-ink">WH {g.warehouse_id}</span>
                     <span className="chip bg-fp-navy text-white">
-                      {g.agent === 'cycle_count' ? 'cycle count' : g.agent === 'rebalance' ? 'rebalance' : g.agent === 'po_followup' ? 'PO chase' : 'replenish'}
+                      {g.agent === 'cycle_count' ? 'cycle count' : g.agent === 'rebalance' ? 'rebalance' : g.agent === 'po_followup' ? 'PO chase' : g.agent === 'forecast' ? 'forecast' : 'replenish'}
                     </span>
                     <span className="chip bg-fp-bg text-fp-ink-2">above {g.threshold}</span>
                     <span

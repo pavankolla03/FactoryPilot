@@ -12,6 +12,7 @@ import { RealtimeGateway } from '../realtime/realtime.gateway';
 import { RedisService } from '../common/redis.service';
 import { AlertsService } from '../alerts/alerts.service';
 import { AgentsService } from '../agents/agents.service';
+import { reportModelOutcome } from '../llm/openrouter-provider';
 import type { NormalizedToolCall } from '../llm/types';
 
 const WRITE_TOOLS = new Set(['moveStock', 'draftPurchaseRequisition', 'receivePurchaseOrder', 'adjustStock']);
@@ -242,6 +243,7 @@ export class ChatService {
     const invokedTools: string[] = [];
     let finalText = '';
     let totalTokens = 0;
+    let lastModelUsed = '';
     let streamedChars = 0;
 
     const toolDefs = tools.map((t) => ({ name: t.name, description: t.description, inputSchema: t.inputSchema }));
@@ -271,6 +273,7 @@ export class ChatService {
           }
         }
 
+        lastModelUsed = completion.modelUsed;
         totalTokens += completion.promptTokens + completion.completionTokens;
         await this.quota.recordUsage({
           userId: user.id,
@@ -451,6 +454,15 @@ export class ChatService {
     await this.insertMessage(convId, 'assistant', finalText);
     const messageId = randomUUID();
     const grounded = invokedTools.length > 0;
+    // Outcome-driven routing signal (beta, Phase K): a model call counts as
+    // "good" when it grounded the answer in tools or produced a final text.
+    if (lastModelUsed) {
+      reportModelOutcome(lastModelUsed, grounded || Boolean(finalText));
+      void this.redis.raw
+        .hIncrBy(`model:quality:${lastModelUsed}`, 'total', 1)
+        .then(() => (grounded || finalText ? this.redis.raw.hIncrBy(`model:quality:${lastModelUsed}`, 'ok', 1) : null))
+        .catch(() => undefined);
+    }
     if (streamedChars === 0) {
       // Non-streaming provider: emit the full text as a single chunk.
       this.realtime.emitChatToken(user.id, { conversationId: convId, delta: finalText });

@@ -15,7 +15,7 @@ const goalSchema = z.object({
   threshold: z.number().int().positive().optional(),
   autonomy: z.enum(['observe', 'propose', 'act']).optional(),
   dailyBudgetQty: z.number().int().positive().optional(),
-  agent: z.enum(['replenishment', 'cycle_count', 'rebalance', 'po_followup']).optional(),
+  agent: z.enum(['replenishment', 'cycle_count', 'rebalance', 'po_followup', 'forecast']).optional(),
 });
 
 const goalPatchSchema = z.object({

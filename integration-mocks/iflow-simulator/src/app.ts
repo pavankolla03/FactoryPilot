@@ -197,8 +197,24 @@ export function createApp(state = new IflowState(), ledger = new WriteLedger()) 
       return res.status(400).json(errorResponse('VALIDATION_ERROR', 'warehouseId is required'));
     }
     const days = Math.min(Number(req.query.days || 14), 90);
-    const records = sapLiveEnabled() ? ledger.getDemandTrend(warehouseId, days) : state.getDemandTrend(warehouseId, days);
+    const byProduct = req.query.byProduct === '1' || req.query.byProduct === 'true';
+    const records = sapLiveEnabled()
+      ? ledger.getDemandTrend(warehouseId, days)
+      : state.getDemandTrend(warehouseId, days, byProduct);
     return res.json({ records, dataSource: sapLiveEnabled() ? 'write-ledger' : 'simulator' });
+  });
+
+  app.get('/iflow/production-orders', (req, res) => {
+    const warehouseId = req.query.warehouseId ? String(req.query.warehouseId) : undefined;
+    const status = req.query.status ? String(req.query.status) : undefined;
+    const records = state.productionOrders.filter(
+      (po) => (!warehouseId || po.warehouseId === warehouseId) && (!status || po.status === status),
+    );
+    return res.json({ records, dataSource: 'simulator' });
+  });
+
+  app.get('/iflow/suppliers', (_req, res) => {
+    return res.json({ records: state.suppliers, dataSource: 'simulator' });
   });
 
   app.get('/iflow/purchase-requisitions', (req, res) => {

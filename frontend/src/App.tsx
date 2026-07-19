@@ -6,6 +6,7 @@ import { Landing } from './components/Landing';
 import { ApprovalsPage, type ScheduledReport } from './components/ApprovalsPage';
 import { AutonomyPage, type AgentGoal, type AgentMetrics, type AgentRun } from './components/AutonomyPage';
 import { ApiKeysCard } from './components/ApiKeysCard';
+import { CommandCenter } from './components/CommandCenter';
 import { BoardPage } from './components/BoardPage';
 import { AuthPage } from './components/AuthPages';
 import { Sidebar, type Tab } from './components/Sidebar';
@@ -540,7 +541,7 @@ function App() {
               withFeedback(async () => {
                 await client.post('/api/agents/goals', g);
                 await loadAgents();
-              }, `Goal created — the ${g.agent === 'cycle_count' ? 'cycle-count planner' : g.agent === 'rebalance' ? 'rebalancer' : 'replenishment agent'} now watches WH ${g.warehouseId}.`)
+              }, `Goal created — the ${g.agent === 'cycle_count' ? 'cycle-count planner' : g.agent === 'rebalance' ? 'rebalancer' : g.agent === 'po_followup' ? 'PO follow-up agent' : g.agent === 'forecast' ? 'forecast agent' : 'replenishment agent'} now watches WH ${g.warehouseId}.`)
             }
             onToggleGoal={(id, active) =>
               withFeedback(async () => {
@@ -606,6 +607,7 @@ function App() {
               isAdmin={role === 'admin'}
               onExport={() => void exportCsv('/api/token-usage/export.csv', 'factorypilot-token-usage.csv')}
             />
+            {role === 'admin' && <CommandCenter client={client} />}
             <ApiKeysCard client={client} />
           </div>
         )}

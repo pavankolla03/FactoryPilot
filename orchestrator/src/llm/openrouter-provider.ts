@@ -8,6 +8,45 @@ import { streamOpenAICompletion } from './openai-stream';
  * Preferred order for free tool-calling models. Anything discovered from the
  * live model list that supports tools at $0 is appended after these.
  */
+/**
+ * Outcome-driven routing (beta, Phase K): in-process quality ledger fed by the
+ * chat service after every answer. Models with >=5 samples are ranked by their
+ * measured success rate; under-sampled models keep their configured priority.
+ */
+const modelOutcomes = new Map<string, { total: number; ok: number }>();
+
+export function reportModelOutcome(model: string, ok: boolean) {
+  const entry = modelOutcomes.get(model) ?? { total: 0, ok: 0 };
+  entry.total += 1;
+  if (ok) {
+    entry.ok += 1;
+  }
+  modelOutcomes.set(model, entry);
+}
+
+export function modelQualitySnapshot() {
+  return [...modelOutcomes.entries()].map(([model, s]) => ({ model, total: s.total, okRate: s.total ? s.ok / s.total : null }));
+}
+
+function rankByOutcome(models: string[]): string[] {
+  return [...models].sort((a, b) => {
+    const sa = modelOutcomes.get(a);
+    const sb = modelOutcomes.get(b);
+    const scoreA = sa && sa.total >= 5 ? sa.ok / sa.total : null;
+    const scoreB = sb && sb.total >= 5 ? sb.ok / sb.total : null;
+    if (scoreA !== null && scoreB !== null && scoreA !== scoreB) {
+      return scoreB - scoreA;
+    }
+    if (scoreA !== null && scoreB === null) {
+      return scoreA >= 0.8 ? -1 : 0;
+    }
+    if (scoreB !== null && scoreA === null) {
+      return scoreB >= 0.8 ? 1 : 0;
+    }
+    return models.indexOf(a) - models.indexOf(b);
+  });
+}
+
 const PREFERRED_FREE_MODELS = [
   'poolside/laguna-m.1:free',
   'meta-llama/llama-3.3-70b-instruct:free',
@@ -117,8 +156,10 @@ export class OpenRouterProvider implements ILLMProvider {
       ordered = [...lightModels, ...this.chain.filter((m) => !lightModels.includes(m))];
     }
 
-    const available = ordered.filter((m) => (this.cooldownUntil.get(m) || 0) <= now);
-    return available.length > 0 ? available : ordered;
+    // Outcome-driven re-ranking (beta): measured success beats configured order.
+    const ranked = rankByOutcome(ordered);
+    const available = ranked.filter((m) => (this.cooldownUntil.get(m) || 0) <= now);
+    return available.length > 0 ? available : ranked;
   }
 
   private async withFallback<T>(light: boolean, fn: (model: string) => Promise<T>): Promise<T> {

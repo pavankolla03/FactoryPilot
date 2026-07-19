@@ -59,6 +59,7 @@ function buildFakes() {
         redisStore.delete(k);
         return v;
       },
+      hIncrBy: async () => 1,
     },
   } as unknown as RedisService;
 
