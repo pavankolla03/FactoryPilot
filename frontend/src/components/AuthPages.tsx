@@ -8,13 +8,16 @@ export function AuthPage({
   onBack,
 }: {
   mode: 'signin' | 'signup';
-  onSubmit: (fields: { email: string; password: string; displayName?: string }) => Promise<void>;
+  onSubmit: (fields: { email: string; password: string; displayName?: string; orgName?: string; joinCode?: string }) => Promise<void>;
   onSwitch: () => void;
   onBack: () => void;
 }) {
   const [email, setEmail] = useState('');
   const [displayName, setDisplayName] = useState('');
   const [password, setPassword] = useState('');
+  const [orgMode, setOrgMode] = useState<'default' | 'create' | 'join'>('default');
+  const [orgName, setOrgName] = useState('');
+  const [joinCode, setJoinCode] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
 
@@ -28,7 +31,13 @@ export function AuthPage({
     setBusy(true);
     setError('');
     try {
-      await onSubmit({ email, password, displayName: isSignup ? displayName : undefined });
+      await onSubmit({
+        email,
+        password,
+        displayName: isSignup ? displayName : undefined,
+        orgName: isSignup && orgMode === 'create' && orgName.trim() ? orgName.trim() : undefined,
+        joinCode: isSignup && orgMode === 'join' && joinCode.trim() ? joinCode.trim() : undefined,
+      });
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Something went wrong — try again.');
     } finally {
@@ -93,7 +102,33 @@ export function AuthPage({
               />
             </div>
             <div>
-              <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-fp-ink-3">
+              {isSignup && (
+              <div className="space-y-2 rounded-xl border border-fp-line p-3">
+                <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wider text-fp-ink-3">
+                  Organization
+                  <span className="chip bg-fp-accent-soft text-fp-accent-dark">Beta</span>
+                </div>
+                <div className="flex gap-1.5 text-xs">
+                  {([['default', 'Demo org'], ['create', 'Create new'], ['join', 'Join with code']] as const).map(([m, l]) => (
+                    <button
+                      key={m}
+                      type="button"
+                      className={`rounded-lg px-2.5 py-1.5 font-medium transition ${orgMode === m ? 'bg-fp-accent text-white' : 'bg-fp-bg text-fp-ink-2'}`}
+                      onClick={() => setOrgMode(m)}
+                    >
+                      {l}
+                    </button>
+                  ))}
+                </div>
+                {orgMode === 'create' && (
+                  <input className="input py-2 text-sm" placeholder="Organization name" value={orgName} onChange={(e) => setOrgName(e.target.value)} />
+                )}
+                {orgMode === 'join' && (
+                  <input className="input py-2 text-sm" placeholder="Join code (from your admin)" value={joinCode} onChange={(e) => setJoinCode(e.target.value)} />
+                )}
+              </div>
+            )}
+            <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-fp-ink-3">
                 Password
               </label>
               <input

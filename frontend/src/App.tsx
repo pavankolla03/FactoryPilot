@@ -34,6 +34,8 @@ type StoredSession = {
   displayName: string;
   role: UserRole;
   email: string;
+  orgName?: string;
+  orgJoinCode?: string;
 };
 
 function loadSession(): StoredSession | null {
@@ -145,7 +147,10 @@ function App() {
     setTab('chat');
   }
 
-  async function authenticate(mode: 'signin' | 'signup', fields: { email: string; password: string; displayName?: string }) {
+  async function authenticate(
+    mode: 'signin' | 'signup',
+    fields: { email: string; password: string; displayName?: string; orgName?: string; joinCode?: string },
+  ) {
     try {
       const res =
         mode === 'signup'
@@ -153,6 +158,8 @@ function App() {
               email: fields.email,
               displayName: fields.displayName,
               password: fields.password,
+              ...(fields.orgName ? { orgName: fields.orgName } : {}),
+              ...(fields.joinCode ? { joinCode: fields.joinCode } : {}),
             })
           : await client.post('/api/auth/login', { email: fields.email, password: fields.password });
 
@@ -161,6 +168,8 @@ function App() {
         displayName: res.data.user.display_name,
         role: res.data.user.role,
         email: res.data.user.email,
+        orgName: res.data.organization?.name,
+        orgJoinCode: res.data.organization?.join_code,
       });
     } catch (error) {
       if (axios.isAxiosError(error)) {
@@ -411,6 +420,7 @@ function App() {
   return (
     <div className="flex min-h-screen flex-col bg-fp-bg md:flex-row">
       <Sidebar
+          orgName={session?.orgName}
         tab={tab}
         role={role}
         displayName={displayName}
@@ -555,6 +565,15 @@ function App() {
                 );
               } catch {
                 showToast('Dry run failed — check your write scope for this warehouse.');
+              }
+            }}
+            onScenario={async ({ warehouseId, demandMultiplier, horizonDays }) => {
+              try {
+                const res = await client.post('/api/agents/simulate', { warehouseId, demandMultiplier, horizonDays });
+                return res.data;
+              } catch {
+                showToast('Scenario projection failed — check your write scope for this warehouse.');
+                return null;
               }
             }}
             metrics={agentMetrics}

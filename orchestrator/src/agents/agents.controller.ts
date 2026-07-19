@@ -15,7 +15,7 @@ const goalSchema = z.object({
   threshold: z.number().int().positive().optional(),
   autonomy: z.enum(['observe', 'propose', 'act']).optional(),
   dailyBudgetQty: z.number().int().positive().optional(),
-  agent: z.enum(['replenishment', 'cycle_count', 'rebalance']).optional(),
+  agent: z.enum(['replenishment', 'cycle_count', 'rebalance', 'po_followup']).optional(),
 });
 
 const goalPatchSchema = z.object({
@@ -86,9 +86,48 @@ export class AgentsController {
   @Post('/simulate')
   @UseGuards(AuthGuard)
   async simulate(@CurrentUser() user: AuthUser, @Body() body: unknown) {
-    const parsed = z.object({ warehouseId: z.string().min(1), threshold: z.number().int().positive().optional() }).parse(body);
+    const parsed = z
+      .object({
+        warehouseId: z.string().min(1),
+        threshold: z.number().int().positive().optional(),
+        demandMultiplier: z.number().min(0.1).max(10).optional(),
+        horizonDays: z.number().int().min(1).max(90).optional(),
+      })
+      .parse(body);
     await this.assertWriteScope(user, parsed.warehouseId);
+    if (parsed.demandMultiplier !== undefined || parsed.horizonDays !== undefined) {
+      return this.agents.simulateScenario(
+        user.id,
+        parsed.warehouseId,
+        parsed.threshold ?? 50,
+        parsed.demandMultiplier ?? 1,
+        parsed.horizonDays ?? 14,
+      );
+    }
     return this.agents.simulate(user.id, parsed.warehouseId, parsed.threshold ?? 50);
+  }
+
+  /** Observability (beta, Phase F): dependency health + platform metrics for the admin's org. */
+  @Get('/admin/observability')
+  @UseGuards(AuthGuard, AdminGuard)
+  observability(@CurrentUser() user: AuthUser) {
+    return this.agents.observability(user.id);
+  }
+
+  /** Feedback flywheel (beta, Phase H): promote a question into the eval suite. */
+  @Post('/eval-cases')
+  @UseGuards(AuthGuard, AdminGuard)
+  async promoteEval(@CurrentUser() user: AuthUser, @Body() body: unknown) {
+    const parsed = z
+      .object({ question: z.string().min(4).max(500), expectSubstring: z.string().max(200).optional() })
+      .parse(body);
+    return this.agents.promoteEvalCase(user.id, parsed.question, parsed.expectSubstring);
+  }
+
+  @Get('/eval-cases')
+  @UseGuards(AuthGuard)
+  listEvalCases(@CurrentUser() user: AuthUser) {
+    return this.agents.listEvalCases(user.id);
   }
 
   @Post('/run')

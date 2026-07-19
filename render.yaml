@@ -1,0 +1,83 @@
+# FactoryPilot — Render blueprint (Phase E, beta)
+# One-click infra: orchestrator + 2 MCP servers + iFlow simulator.
+# Postgres/Redis: create free instances on Neon/Upstash and paste their URLs
+# into the orchestrator env vars below (Render's own free Postgres also works).
+# Frontend deploys separately to Netlify (see netlify.toml).
+services:
+  - type: web
+    name: factorypilot-orchestrator
+    env: docker
+    dockerfilePath: ./orchestrator/Dockerfile
+    dockerContext: .
+    plan: free
+    healthCheckPath: /health
+    envVars:
+      - key: PORT
+        value: "3000"
+      - key: AUTH_MODE
+        value: local
+      - key: AUTH_JWT_SECRET
+        generateValue: true
+      - key: LLM_PROVIDER
+        value: openrouter
+      - key: OPENROUTER_API_KEY
+        sync: false # paste in dashboard
+      - key: DATABASE_URL
+        sync: false # Neon connection string
+      - key: REDIS_URL
+        sync: false # Upstash connection string
+      - key: MCP_SERVERS
+        value: '{"inventory":"https://factorypilot-mcp-inventory.onrender.com","warehouse-ops":"https://factorypilot-mcp-warehouse-ops.onrender.com"}'
+      - key: MCP_SHARED_SECRET
+        generateValue: true
+      - key: PUBLIC_BASE_URL
+        value: https://factorypilot-orchestrator.onrender.com
+      - key: IFLOW_HEALTH_URL
+        value: https://factorypilot-iflow.onrender.com/health
+      - key: CACHE_TTL_SECONDS
+        value: "8640000"
+
+  - type: web
+    name: factorypilot-mcp-inventory
+    env: docker
+    dockerfilePath: ./mcp-servers/mcp-inventory/Dockerfile
+    dockerContext: .
+    plan: free
+    healthCheckPath: /health
+    envVars:
+      - key: PORT
+        value: "4001"
+      - key: IFLOW_BASE_URL
+        value: https://factorypilot-iflow.onrender.com
+      - key: MCP_SHARED_SECRET
+        sync: false # same value as orchestrator
+
+  - type: web
+    name: factorypilot-mcp-warehouse-ops
+    env: docker
+    dockerfilePath: ./mcp-servers/mcp-warehouse-ops/Dockerfile
+    dockerContext: .
+    plan: free
+    healthCheckPath: /health
+    envVars:
+      - key: PORT
+        value: "4002"
+      - key: IFLOW_BASE_URL
+        value: https://factorypilot-iflow.onrender.com
+      - key: REDIS_URL
+        sync: false
+      - key: MCP_SHARED_SECRET
+        sync: false
+
+  - type: web
+    name: factorypilot-iflow
+    env: docker
+    dockerfilePath: ./integration-mocks/iflow-simulator/Dockerfile
+    dockerContext: .
+    plan: free
+    healthCheckPath: /health
+    envVars:
+      - key: PORT
+        value: "4000"
+      - key: SAP_API_KEY
+        sync: false # api.sap.com sandbox key — enables live S/4HANA reads

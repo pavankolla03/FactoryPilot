@@ -216,7 +216,8 @@ export class ChatService {
 
     // Episodic memory (beta): recall recent history for warehouses in play.
     const mentionedWarehouses = [...new Set([...(message.match(/\b10[1-5]0\b/g) || []), preferences.default_warehouse].filter(Boolean))];
-    const episodes = await this.agents.recallEpisodes(mentionedWarehouses.map((w) => `wh:${w}`));
+    const orgPrefix = `org:${user.orgId ?? 'default'}:`;
+    const episodes = await this.agents.recallEpisodes(mentionedWarehouses.map((w) => `${orgPrefix}wh:${w}`));
     const episodeNote = episodes.length
       ? ` Relevant recent history: ${episodes.join(' | ')}`
       : '';

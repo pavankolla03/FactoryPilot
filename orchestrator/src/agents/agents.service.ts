@@ -66,8 +66,8 @@ export class AgentsService {
       validationError("autonomy must be 'observe', 'propose', or 'act'");
     }
     const agent = args.agent || 'replenishment';
-    if (!['replenishment', 'cycle_count', 'rebalance'].includes(agent)) {
-      validationError("agent must be 'replenishment', 'cycle_count', or 'rebalance'");
+    if (!['replenishment', 'cycle_count', 'rebalance', 'po_followup'].includes(agent)) {
+      validationError("agent must be 'replenishment', 'cycle_count', 'rebalance', or 'po_followup'");
     }
     const row = await this.db.query<AgentGoal>(
       `INSERT INTO agent_goals(user_id, agent, warehouse_id, threshold, autonomy, daily_budget_qty)
@@ -105,11 +105,14 @@ export class AgentsService {
   }
 
   async listRuns(userId: string, isAdmin: boolean) {
+    // Admins see their whole organization's runs, never another tenant's (beta multi-tenancy).
     const rows = await this.db.query(
       isAdmin
-        ? 'SELECT * FROM agent_runs ORDER BY started_at DESC LIMIT 25'
+        ? `SELECT r.* FROM agent_runs r JOIN users u ON u.id = r.user_id
+           WHERE u.org_id = (SELECT org_id FROM users WHERE id = $1)
+           ORDER BY r.started_at DESC LIMIT 25`
         : 'SELECT * FROM agent_runs WHERE user_id = $1 ORDER BY started_at DESC LIMIT 25',
-      isAdmin ? [] : [userId],
+      [userId],
     );
     return rows.rows;
   }
@@ -132,6 +135,8 @@ export class AgentsService {
     const goalText =
       agent === 'cycle_count'
         ? `Weekly cycle-count plan for warehouse ${options.warehouseId} (trigger: ${options.trigger})`
+        : agent === 'po_followup'
+          ? `Chase overdue purchase orders for warehouse ${options.warehouseId} (trigger: ${options.trigger})`
         : agent === 'rebalance'
           ? `Rebalance warehouse ${options.warehouseId}: feed starved downstream locations from surplus (autonomy: ${autonomy}, trigger: ${options.trigger})`
           : `Keep warehouse ${options.warehouseId} stocked above ${threshold} (autonomy: ${autonomy}, trigger: ${options.trigger})`;
@@ -148,6 +153,8 @@ export class AgentsService {
     const executor =
       agent === 'cycle_count'
         ? this.executeCycleCount(runId, options.userId, { warehouseId: options.warehouseId })
+        : agent === 'po_followup'
+          ? this.executePoFollowup(runId, options.userId, options.warehouseId)
         : agent === 'rebalance'
           ? this.executeRebalance(runId, options.userId, options.displayName, {
               warehouseId: options.warehouseId,
@@ -295,7 +302,7 @@ export class AgentsService {
       );
       await this.notifyOwner(userId, 'Replenishment run completed', `WH ${cfg.warehouseId}: auto-drafted ${suggestions.length} PR(s), ${totalQty} units. All verified.`);
       await this.recordEpisode(
-        `wh:${cfg.warehouseId}`,
+        `${await this.orgScopePrefix(userId)}wh:${cfg.warehouseId}`,
         `Auto-replenishment drafted ${suggestions.length} PR(s) for ${suggestions.map((s) => s.materialId).join(', ')} (${totalQty} units).`,
       );
       return;
@@ -424,7 +431,7 @@ export class AgentsService {
         await this.addStep(runId, 'act', `Moved ${m.qty} × ${m.productId} ${m.fromLocation}→${m.toLocation}`, 'ok');
       }
       await this.finishRun(runId, 'completed', `Auto-rebalanced ${moves.length} move(s), ${totalQty} units.`);
-      await this.recordEpisode(`wh:${cfg.warehouseId}`, `Auto-rebalanced ${moves.length} move(s) (${totalQty} units).`);
+      await this.recordEpisode(`${await this.orgScopePrefix(userId)}wh:${cfg.warehouseId}`, `Auto-rebalanced ${moves.length} move(s) (${totalQty} units).`);
       await this.notifyOwner(userId, 'Rebalance run completed', `WH ${cfg.warehouseId}: auto-rebalanced ${totalQty} units.`);
       return;
     }
@@ -501,6 +508,156 @@ export class AgentsService {
   }
 
   /**
+   * PO FOLLOW-UP AGENT (beta, Phase G): finds purchase orders past their
+   * expected delivery date and drafts supplier chase messages. Read-only —
+   * output is a notification/webhook, never a write.
+   */
+  private async executePoFollowup(runId: string, userId: string, warehouseId: string) {
+    const pos = (await this.mcp.callTool('getPurchaseOrders', { warehouseId })) as {
+      structuredContent?: { records?: Array<Record<string, unknown>> };
+    };
+    const records = (pos.structuredContent?.records ?? []) as Array<Record<string, unknown>>;
+    await this.addStep(runId, 'observe', `Observed ${records.length} purchase order(s) for WH ${warehouseId}.`, 'ok');
+
+    const today = new Date().toISOString().slice(0, 10);
+    const overdue = records.filter(
+      (po) => po.status !== 'delivered' && typeof po.expectedDelivery === 'string' && String(po.expectedDelivery) < today,
+    );
+    await this.addStep(
+      runId,
+      'plan',
+      overdue.length
+        ? `${overdue.length} overdue PO(s): ${overdue
+            .map((po) => `${po.poNumber} (${po.supplier}, due ${po.expectedDelivery}, ${po.qty} × ${po.materialId})`)
+            .join('; ')}`
+        : 'No overdue purchase orders.',
+      'ok',
+    );
+
+    if (overdue.length === 0) {
+      await this.finishRun(runId, 'completed', 'All open POs are within their expected delivery dates.');
+      return;
+    }
+
+    const chase = overdue
+      .map(
+        (po) =>
+          `• ${po.supplier}: PO ${po.poNumber} (${po.qty} × ${po.materialId}) was due ${po.expectedDelivery} — please confirm a revised delivery date.`,
+      )
+      .join('\n');
+    await this.notifyOwner(userId, `Overdue POs — WH ${warehouseId}`, `Draft supplier chase:\n${chase}`);
+    await this.addStep(runId, 'act', `Chase draft for ${overdue.length} supplier message(s) delivered to notifications + webhook.`, 'ok');
+    await this.finishRun(runId, 'completed', `Flagged ${overdue.length} overdue PO(s) and drafted supplier chases.`);
+    await this.recordEpisode(
+      `${await this.orgScopePrefix(userId)}wh:${warehouseId}`,
+      `PO follow-up flagged ${overdue.length} overdue order(s): ${overdue.map((p) => p.poNumber).join(', ')}.`,
+    );
+  }
+
+  /**
+   * WHAT-IF SCENARIO (beta, Phase G): extends the dry-run with demand shocks.
+   * Daily demand is derived from the live movement trend; the scenario scales
+   * it and projects each low position over the horizon. Zero writes.
+   */
+  async simulateScenario(
+    userId: string,
+    warehouseId: string,
+    threshold: number,
+    demandMultiplier: number,
+    horizonDays: number,
+  ) {
+    const base = await this.simulate(userId, warehouseId, threshold);
+    const trend = (await this.mcp.callTool('getDemandTrend', { warehouseId, days: 14 })) as {
+      structuredContent?: { records?: Array<Record<string, unknown>> };
+    };
+    const trendRecords = (trend.structuredContent?.records ?? []) as Array<Record<string, unknown>>;
+    // Average daily outbound per material over the observed window.
+    const dailyByMaterial = new Map<string, number>();
+    for (const r of trendRecords) {
+      const mat = String(r.materialId ?? r.productId ?? '');
+      const qty = Number(r.outboundQty ?? r.qty ?? 0);
+      dailyByMaterial.set(mat, (dailyByMaterial.get(mat) ?? 0) + qty);
+    }
+    for (const [mat, total] of dailyByMaterial) {
+      dailyByMaterial.set(mat, total / 14);
+    }
+
+    const projected = base.projected.map((p) => {
+      const daily = (dailyByMaterial.get(p.materialId) ?? 0) * demandMultiplier;
+      const demandOverHorizon = Math.round(daily * horizonDays);
+      const endQty = p.currentQty + p.inboundQty - demandOverHorizon;
+      return {
+        ...p,
+        forecastDailyDemand: Math.round(daily * 100) / 100,
+        demandOverHorizon,
+        projectedEndQty: endQty,
+        stockoutRisk: endQty < 0 ? 'STOCKOUT' : endQty < threshold ? 'below threshold' : 'ok',
+        suggestedOrderQty: Math.max(threshold * 2 - endQty, 0),
+      };
+    });
+
+    return {
+      ...base,
+      scenario: { demandMultiplier, horizonDays },
+      projected,
+      stockouts: projected.filter((p) => p.projectedEndQty < 0).length,
+      totalUnitsToOrder: projected.reduce((s, p) => s + p.suggestedOrderQty, 0),
+    };
+  }
+
+  /**
+   * OBSERVABILITY (beta, Phase F): dependency health + platform metrics in one
+   * payload — the pilot-operations dashboard backend.
+   */
+  async observability(userId: string) {
+    const t0 = Date.now();
+    await this.db.query('SELECT 1');
+    const dbMs = Date.now() - t0;
+    const t1 = Date.now();
+    await this.redis.raw.ping();
+    const redisMs = Date.now() - t1;
+    let iflow: { ok: boolean; ms: number } = { ok: false, ms: -1 };
+    try {
+      const t2 = Date.now();
+      const res = await fetch(`${process.env.IFLOW_HEALTH_URL || 'http://iflow-simulator:4000/health'}`);
+      iflow = { ok: res.ok, ms: Date.now() - t2 };
+    } catch {
+      iflow = { ok: false, ms: -1 };
+    }
+
+    const orgScope = '(SELECT org_id FROM users WHERE id = $1)';
+    const runStats = await this.db.query<{ avg_ms: string | null; p95_ms: string | null }>(
+      `SELECT AVG(EXTRACT(EPOCH FROM (finished_at - started_at)) * 1000)::int AS avg_ms,
+              PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY EXTRACT(EPOCH FROM (finished_at - started_at)) * 1000)::int AS p95_ms
+       FROM agent_runs r JOIN users u ON u.id = r.user_id
+       WHERE r.finished_at IS NOT NULL AND r.finished_at >= r.started_at AND u.org_id = ${orgScope}`,
+      [userId],
+    );
+    const cacheStats = await this.db.query<{ hits: string; total: string }>(
+      `SELECT COUNT(*) FILTER (WHERE cache_status = 'hit')::int AS hits, COUNT(*)::int AS total
+       FROM session_logs s JOIN users u ON u.id = s.user_id WHERE u.org_id = ${orgScope}`,
+      [userId],
+    );
+    const modelStats = await this.db.query(
+      `SELECT model_used, COUNT(*)::int AS calls, SUM(total_tokens)::int AS tokens
+       FROM token_usage t JOIN users u ON u.id = t.user_id WHERE u.org_id = ${orgScope}
+       GROUP BY model_used ORDER BY calls DESC LIMIT 8`,
+      [userId],
+    );
+    const total = Number(cacheStats.rows[0]?.total || 0);
+    return {
+      dependencies: {
+        postgres: { ok: true, ms: dbMs },
+        redis: { ok: true, ms: redisMs },
+        iflow,
+      },
+      runs: { avgMs: Number(runStats.rows[0]?.avg_ms || 0), p95Ms: Number(runStats.rows[0]?.p95_ms || 0) },
+      cacheHitRate: total ? Math.round((Number(cacheStats.rows[0].hits) / total) * 100) : null,
+      models: modelStats.rows,
+    };
+  }
+
+  /**
    * CRITIC (beta): an LLM reviews the plan against open orders and drafts.
    * Fails open — if the model is unavailable the plan proceeds with a note.
    */
@@ -568,15 +725,31 @@ export class AgentsService {
     );
     await this.addStep(runId, 'act', 'Checklist delivered to notifications and webhook.', 'ok');
     await this.finishRun(runId, 'completed', `Proposed a ${picks.length}-position count plan for WH ${cfg.warehouseId}.`);
-    await this.recordEpisode(`wh:${cfg.warehouseId}`, `Cycle-count plan proposed for ${picks.length} positions.`);
+    await this.recordEpisode(`${await this.orgScopePrefix(userId)}wh:${cfg.warehouseId}`, `Cycle-count plan proposed for ${picks.length} positions.`);
   }
 
   /** Announce a pending approval on the owner's webhook with a one-click link (beta). */
   async announceApproval(userId: string, action: PendingAction) {
+    const link = this.quickApproveLink(action.actionId, userId);
+    const token = link.split('token=')[1] ?? '';
+    // Slack Block Kit (beta): in a Slack app with interactivity pointed at
+    // /api/agents/integrations/slack/actions this renders a real Approve button;
+    // plain incoming webhooks simply ignore the blocks and show the text.
+    const blocks = [
+      { type: 'section', text: { type: 'mrkdwn', text: `*Approval requested*\n${action.humanSummary}` } },
+      {
+        type: 'actions',
+        elements: [
+          { type: 'button', style: 'primary', text: { type: 'plain_text', text: '✅ Approve' }, action_id: 'fp_quick_approve', value: token },
+          { type: 'button', url: link, text: { type: 'plain_text', text: 'Open approval page' } },
+        ],
+      },
+    ];
     await this.notifyOwner(
       userId,
       'Approval requested',
-      `${action.humanSummary}\nOne-click approve (beta): ${this.quickApproveLink(action.actionId, userId)}`,
+      `${action.humanSummary}\nOne-click approve (beta): ${link}`,
+      blocks,
     );
   }
 
@@ -629,7 +802,7 @@ export class AgentsService {
           run.id,
         ]);
         await this.addStep(run.id, 'outcome', `Outcome check: ${outcome}`, uncovered.length === 0 ? 'ok' : 'failed');
-        await this.recordEpisode(`wh:${run.warehouse_id}`, `Replenishment run outcome — ${outcome}`);
+        await this.recordEpisode(`${await this.orgScopePrefix(run.user_id)}wh:${run.warehouse_id}`, `Replenishment run outcome — ${outcome}`);
       } catch (error) {
         this.logger.warn(`Outcome check failed for run ${run.id}: ${error instanceof Error ? error.message : '?'}`);
       }
@@ -701,8 +874,10 @@ export class AgentsService {
 
   /** RUN ANALYTICS (Phase D observability): effectiveness, cost, throughput. */
   async metrics(userId: string, isAdmin: boolean) {
-    const scope = isAdmin ? '' : 'WHERE user_id = $1';
-    const params = isAdmin ? [] : [userId];
+    const scope = isAdmin
+      ? 'WHERE user_id IN (SELECT id FROM users WHERE org_id = (SELECT org_id FROM users WHERE id = $1))'
+      : 'WHERE user_id = $1';
+    const params = [userId];
     const runs = await this.db.query<{
       total: string;
       completed: string;
@@ -723,7 +898,7 @@ export class AgentsService {
     );
     const fb = await this.db.query<{ up: string; down: string }>(
       `SELECT COUNT(*) FILTER (WHERE rating = 1)::int AS up, COUNT(*) FILTER (WHERE rating = -1)::int AS down
-       FROM feedback ${isAdmin ? '' : 'WHERE user_id = $1'}`,
+       FROM feedback ${scope}`,
       params,
     );
     const r = runs.rows[0];
@@ -747,11 +922,39 @@ export class AgentsService {
                WHERE m.conversation_id = f.conversation_id AND m.role = 'user'
                ORDER BY m.created_at DESC LIMIT 1) AS last_question
        FROM feedback f JOIN users u ON u.id = f.user_id
-       ${isAdmin ? '' : 'WHERE f.user_id = $1'}
+       WHERE ${isAdmin ? 'u.org_id = (SELECT org_id FROM users WHERE id = $1)' : 'f.user_id = $1'}
        ORDER BY f.created_at DESC LIMIT 50`,
-      isAdmin ? [] : [userId],
+      [userId],
     );
     return rows.rows;
+  }
+
+  /** Feedback flywheel (beta): promote a question into the eval regression suite. */
+  async promoteEvalCase(userId: string, question: string, expectSubstring?: string) {
+    const row = await this.db.query(
+      `INSERT INTO eval_cases(org_id, question, expect_substring)
+       VALUES((SELECT org_id FROM users WHERE id = $1), $2, $3) RETURNING *`,
+      [userId, question, expectSubstring ?? null],
+    );
+    return row.rows[0];
+  }
+
+  async listEvalCases(userId: string) {
+    const rows = await this.db.query(
+      `SELECT * FROM eval_cases WHERE org_id = (SELECT org_id FROM users WHERE id = $1) ORDER BY created_at DESC`,
+      [userId],
+    );
+    return rows.rows;
+  }
+
+  /** Episodic scope prefix — episodes are tenant-scoped so recall never crosses orgs. */
+  private orgCache = new Map<string, string>();
+  async orgScopePrefix(userId: string): Promise<string> {
+    if (!this.orgCache.has(userId)) {
+      const row = await this.db.query<{ org_id: string | null }>('SELECT org_id FROM users WHERE id = $1', [userId]);
+      this.orgCache.set(userId, row.rows[0]?.org_id ?? 'default');
+    }
+    return `org:${this.orgCache.get(userId)}:`;
   }
 
   /** RETENTION (Phase D): daily purge of aged runs, logs, and read notifications. */
@@ -778,7 +981,11 @@ export class AgentsService {
     await this.addStep(runId, 'act', `${count} draft(s) executed after approval by ${approverName} (${executedQty} units).`, 'ok');
     await this.verifyDrafts(runId, warehouseId, null);
     await this.finishRun(runId, 'completed', `Completed after human approval by ${approverName}.`);
-    await this.recordEpisode(`wh:${warehouseId}`, `Replenishment plan (${executedQty} units) approved by ${approverName} and executed.`);
+    const runOwner = await this.db.query<{ user_id: string }>('SELECT user_id FROM agent_runs WHERE id = $1', [runId]);
+    await this.recordEpisode(
+      `${await this.orgScopePrefix(runOwner.rows[0]?.user_id ?? '')}wh:${warehouseId}`,
+      `Replenishment plan (${executedQty} units) approved by ${approverName} and executed.`,
+    );
   }
 
   /** VERIFY — read the PRs back from the source system before declaring success. */
@@ -909,7 +1116,7 @@ export class AgentsService {
     }
   }
 
-  private async notifyOwner(userId: string, title: string, body: string) {
+  private async notifyOwner(userId: string, title: string, body: string, blocks?: unknown[]) {
     const row = await this.db.query(
       'INSERT INTO notifications(user_id, title, body) VALUES($1, $2, $3) RETURNING *',
       [userId, title, body],
@@ -925,7 +1132,7 @@ export class AgentsService {
         await fetch(url, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ text: `*${title}*\n${body}` }),
+          body: JSON.stringify({ text: `*${title}*\n${body}`, ...(blocks ? { blocks } : {}) }),
         });
       }
     } catch (error) {

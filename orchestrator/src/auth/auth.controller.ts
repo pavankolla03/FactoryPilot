@@ -15,6 +15,8 @@ const signupSchema = z.object({
   email: z.string().email(),
   displayName: z.string().min(1).max(80),
   password: z.string().min(8, 'Password must be at least 8 characters'),
+  orgName: z.string().min(1).max(80).optional(),
+  joinCode: z.string().min(1).max(16).optional(),
 });
 
 const loginSchema = z.object({
@@ -29,7 +31,7 @@ export class AuthController {
   @Post('/signup')
   async signup(@Body() body: unknown) {
     const parsed = signupSchema.parse(body);
-    return this.authService.signup(parsed.email, parsed.displayName, parsed.password);
+    return this.authService.signup(parsed.email, parsed.displayName, parsed.password, parsed.orgName, parsed.joinCode);
   }
 
   @Post('/login')

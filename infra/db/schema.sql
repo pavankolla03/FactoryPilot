@@ -208,3 +208,20 @@ CREATE INDEX IF NOT EXISTS idx_api_keys_prefix ON api_keys (prefix) WHERE revoke
 
 ALTER TABLE warehouse_policies ADD COLUMN IF NOT EXISTS write_window_start INT;
 ALTER TABLE warehouse_policies ADD COLUMN IF NOT EXISTS write_window_end INT;
+
+CREATE TABLE IF NOT EXISTS organizations (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  name TEXT NOT NULL,
+  join_code TEXT NOT NULL UNIQUE DEFAULT substr(md5(random()::text), 1, 8),
+  created_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
+ALTER TABLE users ADD COLUMN IF NOT EXISTS org_id UUID REFERENCES organizations(id);
+
+CREATE TABLE IF NOT EXISTS eval_cases (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  org_id UUID,
+  question TEXT NOT NULL,
+  expect_substring TEXT,
+  source TEXT NOT NULL DEFAULT 'feedback',
+  created_at TIMESTAMP NOT NULL DEFAULT NOW()
+);

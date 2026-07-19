@@ -1,8 +1,11 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Res, UseGuards } from '@nestjs/common';
+import type { Response } from 'express';
 import { z } from 'zod';
-import { AuthGuard } from '../auth/auth.guard';
+import { AuthGuard, CurrentUser } from '../auth/auth.guard';
 import { AdminGuard } from '../auth/roles.guard';
+import type { AuthUser } from '../common/types';
 import { DbService } from '../common/db.service';
+import { throwApiError } from '../common/errors';
 
 const createUserSchema = z.object({
   email: z.string().email(),
@@ -30,7 +33,7 @@ export class AdminController {
   constructor(private readonly db: DbService) {}
 
   @Get()
-  async listUsers() {
+  async listUsers(@CurrentUser() admin: AuthUser) {
     const users = await this.db.query(
       `SELECT u.id,
               u.email,
@@ -52,9 +55,65 @@ export class AdminController {
          FROM user_scopes
          GROUP BY user_id
        ) s ON s.user_id = u.id
+       WHERE u.org_id = (SELECT org_id FROM users WHERE id = $1)
        ORDER BY u.created_at DESC`,
+      [admin.id],
     );
     return users.rows;
+  }
+
+  /** Org profile for the admin's tenant (beta multi-tenancy): name + join code to invite teammates. */
+  @Get('/org')
+  async orgProfile(@CurrentUser() admin: AuthUser) {
+    const row = await this.db.query(
+      `SELECT o.id, o.name, o.join_code, o.created_at,
+              (SELECT COUNT(*)::int FROM users WHERE org_id = o.id) AS member_count
+       FROM organizations o JOIN users u ON u.org_id = o.id WHERE u.id = $1`,
+      [admin.id],
+    );
+    return row.rows[0] ?? null;
+  }
+
+  /** GDPR-style data deletion (beta): purge a user's conversational and telemetry data, keep the account. */
+  @Delete('/:id/data')
+  async purgeUserData(@CurrentUser() admin: AuthUser, @Param('id') id: string) {
+    const target = await this.db.query<{ org_id: string | null }>('SELECT org_id FROM users WHERE id = $1', [id]);
+    const own = await this.db.query<{ org_id: string | null }>('SELECT org_id FROM users WHERE id = $1', [admin.id]);
+    if (!target.rows[0] || target.rows[0].org_id !== own.rows[0]?.org_id) {
+      throwApiError(404, 'VALIDATION_ERROR', 'User not found in your organization');
+    }
+    const tables = [
+      'conversations',
+      'session_logs',
+      'notifications',
+      'stock_alerts',
+      'scheduled_reports',
+      'token_usage',
+      'feedback',
+    ];
+    for (const t of tables) {
+      await this.db.query(`DELETE FROM ${t} WHERE user_id = $1`, [id]);
+    }
+    return { success: true, purged: tables };
+  }
+
+  /** Audit export (beta): every agent run in the admin's org as CSV for SIEM ingestion. */
+  @Get('/audit/agent-runs.csv')
+  async auditRunsCsv(@CurrentUser() admin: AuthUser, @Res() res: Response) {
+    const rows = await this.db.query<Record<string, unknown>>(
+      `SELECT r.id, r.agent, r.warehouse_id, r.goal_text, r.status, r.outcome, u.email AS owner,
+              r.started_at, r.finished_at, jsonb_array_length(r.steps) AS step_count
+       FROM agent_runs r JOIN users u ON u.id = r.user_id
+       WHERE u.org_id = (SELECT org_id FROM users WHERE id = $1)
+       ORDER BY r.started_at DESC LIMIT 2000`,
+      [admin.id],
+    );
+    const cols = ['id', 'agent', 'warehouse_id', 'goal_text', 'status', 'outcome', 'owner', 'started_at', 'finished_at', 'step_count'];
+    const esc = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+    const csv = [cols.join(','), ...rows.rows.map((r) => cols.map((c) => esc(r[c])).join(','))].join('\n');
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', 'attachment; filename="factorypilot-agent-runs.csv"');
+    res.send(csv);
   }
 
   @Post()

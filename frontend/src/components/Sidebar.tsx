@@ -22,6 +22,7 @@ export function Sidebar({
   onLang,
   onLogout,
   pendingCount,
+  orgName,
 }: {
   tab: Tab;
   role: 'admin' | 'viewer';
@@ -31,6 +32,7 @@ export function Sidebar({
   onLang: (l: Lang) => void;
   onLogout: () => void;
   pendingCount: number;
+  orgName?: string;
 }) {
   const { t } = useI18n();
 
@@ -40,7 +42,7 @@ export function Sidebar({
         <LogoMark size={36} />
         <div>
           <div className="text-[15px] font-semibold tracking-tight text-white">FactoryPilot</div>
-          <div className="text-[11px] text-[#5B6B81]">SAP Manufacturing AI</div>
+          <div className="text-[11px] text-[#5B6B81]">{orgName || 'SAP Manufacturing AI'}</div>
         </div>
       </div>
 

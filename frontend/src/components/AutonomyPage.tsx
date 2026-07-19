@@ -12,6 +12,22 @@ export type AgentGoal = {
   last_run_at: string | null;
 };
 
+export type ScenarioResult = {
+  warehouseId: string;
+  scenario: { demandMultiplier: number; horizonDays: number };
+  stockouts: number;
+  totalUnitsToOrder: number;
+  projected: Array<{
+    materialId: string;
+    currentQty: number;
+    inboundQty: number;
+    forecastDailyDemand: number;
+    projectedEndQty: number;
+    stockoutRisk: string;
+    suggestedOrderQty: number;
+  }>;
+};
+
 export type AgentMetrics = {
   totalRuns: number;
   completed: number;
@@ -62,6 +78,7 @@ export function AutonomyPage({
   onToggleGoal,
   onRunNow,
   onSimulate,
+  onScenario,
   metrics,
 }: {
   goals: AgentGoal[];
@@ -70,6 +87,7 @@ export function AutonomyPage({
   onToggleGoal: (id: string, active: boolean) => Promise<void>;
   onRunNow: (warehouseId: string, goalId?: string) => Promise<void>;
   onSimulate: (warehouseId: string, threshold: number) => Promise<void>;
+  onScenario: (args: { warehouseId: string; demandMultiplier: number; horizonDays: number }) => Promise<ScenarioResult | null>;
   metrics: AgentMetrics | null;
 }) {
   const [warehouseId, setWarehouseId] = useState('1030');
@@ -78,6 +96,11 @@ export function AutonomyPage({
   const [autonomy, setAutonomy] = useState('propose');
   const [budget, setBudget] = useState('200');
   const [expandedRun, setExpandedRun] = useState<string | null>(null);
+  const [scWarehouse, setScWarehouse] = useState('1020');
+  const [scDemand, setScDemand] = useState('150');
+  const [scHorizon, setScHorizon] = useState('14');
+  const [scenario, setScenario] = useState<ScenarioResult | null>(null);
+  const [scenarioLoading, setScenarioLoading] = useState(false);
 
   return (
     <div className="grid items-start gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)]">
@@ -98,6 +121,7 @@ export function AutonomyPage({
               <option value="replenishment">Replenishment agent</option>
               <option value="cycle_count">Cycle-count planner</option>
               <option value="rebalance">Rebalancer (beta)</option>
+              <option value="po_followup">PO follow-up (beta)</option>
             </select>
             <select className="input !w-32 py-2 text-xs" value={warehouseId} onChange={(e) => setWarehouseId(e.target.value)}>
               {WAREHOUSES.map((w) => (
@@ -155,7 +179,7 @@ export function AutonomyPage({
                   <div className="flex items-center gap-2">
                     <span className="text-sm font-semibold text-fp-ink">WH {g.warehouse_id}</span>
                     <span className="chip bg-fp-navy text-white">
-                      {g.agent === 'cycle_count' ? 'cycle count' : g.agent === 'rebalance' ? 'rebalance' : 'replenish'}
+                      {g.agent === 'cycle_count' ? 'cycle count' : g.agent === 'rebalance' ? 'rebalance' : g.agent === 'po_followup' ? 'PO chase' : 'replenish'}
                     </span>
                     <span className="chip bg-fp-bg text-fp-ink-2">above {g.threshold}</span>
                     <span
@@ -200,6 +224,90 @@ export function AutonomyPage({
             ))}
           </div>
         )}
+
+        <div className="mt-5 border-t border-fp-line pt-4">
+          <h3 className="flex items-center gap-2 text-sm font-semibold text-fp-ink">
+            What-if planner
+            <span className="chip bg-fp-accent-soft text-fp-accent-dark">Beta</span>
+          </h3>
+          <p className="mb-3 text-xs text-fp-ink-3">
+            Project a demand shock over a horizon — forecast from live movement history, zero writes.
+          </p>
+          <div className="flex flex-wrap items-center gap-2">
+            <select className="input !w-28 py-2 text-xs" value={scWarehouse} onChange={(e) => setScWarehouse(e.target.value)}>
+              {WAREHOUSES.map((w) => (
+                <option key={w} value={w}>
+                  WH {w}
+                </option>
+              ))}
+            </select>
+            <label className="flex items-center gap-1.5 text-xs text-fp-ink-2">
+              demand
+              <input className="input !w-20 py-2 text-xs" value={scDemand} onChange={(e) => setScDemand(e.target.value.replace(/[^0-9]/g, ''))} />
+              %
+            </label>
+            <label className="flex items-center gap-1.5 text-xs text-fp-ink-2">
+              over
+              <input className="input !w-16 py-2 text-xs" value={scHorizon} onChange={(e) => setScHorizon(e.target.value.replace(/[^0-9]/g, ''))} />
+              days
+            </label>
+            <button
+              className="btn-primary px-3 py-2 text-xs"
+              disabled={scenarioLoading}
+              onClick={() => {
+                setScenarioLoading(true);
+                void onScenario({
+                  warehouseId: scWarehouse,
+                  demandMultiplier: (Number(scDemand) || 100) / 100,
+                  horizonDays: Number(scHorizon) || 14,
+                })
+                  .then(setScenario)
+                  .finally(() => setScenarioLoading(false));
+              }}
+            >
+              {scenarioLoading ? 'Projecting…' : 'Project'}
+            </button>
+          </div>
+          {scenario && (
+            <div className="mt-3 overflow-x-auto rounded-xl border border-fp-line">
+              <div className="border-b border-fp-line bg-fp-bg px-3 py-2 text-xs font-medium text-fp-ink">
+                WH {scenario.warehouseId} · demand ×{scenario.scenario.demandMultiplier} · {scenario.scenario.horizonDays}d —{' '}
+                {scenario.stockouts > 0 ? (
+                  <span className="font-semibold text-fp-bad">{scenario.stockouts} projected stockout(s)</span>
+                ) : (
+                  <span className="font-semibold text-fp-good">no stockouts projected</span>
+                )}
+                {scenario.totalUnitsToOrder > 0 && ` · order ${scenario.totalUnitsToOrder} units to cover`}
+              </div>
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="text-left text-fp-ink-3">
+                    <th className="px-3 py-1.5">Material</th>
+                    <th className="px-3 py-1.5">Now</th>
+                    <th className="px-3 py-1.5">Inbound</th>
+                    <th className="px-3 py-1.5">Daily fcst</th>
+                    <th className="px-3 py-1.5">End qty</th>
+                    <th className="px-3 py-1.5">Risk</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {scenario.projected.map((row) => (
+                    <tr key={row.materialId} className="border-t border-fp-line text-fp-ink">
+                      <td className="px-3 py-1.5 font-medium">{row.materialId}</td>
+                      <td className="px-3 py-1.5">{row.currentQty}</td>
+                      <td className="px-3 py-1.5">{row.inboundQty}</td>
+                      <td className="px-3 py-1.5">{row.forecastDailyDemand}</td>
+                      <td className={`px-3 py-1.5 font-semibold ${row.projectedEndQty < 0 ? 'text-fp-bad' : ''}`}>{row.projectedEndQty}</td>
+                      <td className={`px-3 py-1.5 ${row.stockoutRisk === 'STOCKOUT' ? 'font-semibold text-fp-bad' : row.stockoutRisk === 'ok' ? 'text-fp-good' : 'text-fp-warn'}`}>
+                        {row.stockoutRisk}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
       </section>
 
       <section className="card p-5">

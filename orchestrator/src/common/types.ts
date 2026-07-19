@@ -9,6 +9,8 @@ export interface AuthUser {
   displayName: string;
   role: 'admin' | 'viewer';
   scopes: WarehouseScope[];
+  /** Tenant id (beta multi-tenancy). Nullable for legacy tokens. */
+  orgId?: string | null;
 }
 
 export interface RequestWithUser {

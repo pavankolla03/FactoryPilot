@@ -79,7 +79,8 @@ export class AuthService {
         email: string;
         display_name: string;
         role: 'admin' | 'viewer';
-      }>('SELECT id, email, display_name, role FROM users WHERE id = $1', [decoded.sub]);
+        org_id: string | null;
+      }>('SELECT id, email, display_name, role, org_id FROM users WHERE id = $1', [decoded.sub]);
       const user = row.rows[0];
       if (!user) {
         return null;
@@ -92,6 +93,7 @@ export class AuthService {
         displayName: user.display_name,
         role: user.role,
         scopes,
+        orgId: user.org_id,
       };
     }
 
@@ -168,7 +170,13 @@ export class AuthService {
     });
   }
 
-  async signup(email: string, displayName: string, password: string) {
+  async signup(
+    email: string,
+    displayName: string,
+    password: string,
+    orgName?: string,
+    joinCode?: string,
+  ) {
     const existing = await this.db.query<{ id: string; password_hash: string | null }>(
       'SELECT id, password_hash FROM users WHERE email = $1',
       [email],
@@ -177,30 +185,52 @@ export class AuthService {
       throwApiError(409, 'VALIDATION_ERROR', 'An account with this email already exists — sign in instead.');
     }
 
-    // The first credentialed account becomes the administrator; everyone after
-    // signs up as an operator and gets warehouse access granted by an admin.
-    const admins = await this.db.query<{ count: string }>(
-      "SELECT COUNT(*)::int AS count FROM users WHERE password_hash IS NOT NULL AND role = 'admin'",
-    );
-    const role: 'admin' | 'viewer' = Number(admins.rows[0]?.count || 0) === 0 ? 'admin' : 'viewer';
+    // Multi-tenancy (beta):
+    //  - a join code puts the account into that organization as an operator
+    //  - an explicit orgName creates a fresh organization with this user as its admin
+    //  - neither (legacy path) joins the oldest org with the original first-admin rule
+    let orgId: string;
+    let role: 'admin' | 'viewer';
+    if (joinCode) {
+      const org = await this.db.query<{ id: string }>('SELECT id FROM organizations WHERE join_code = $1', [joinCode]);
+      if (!org.rows[0]) {
+        throwApiError(404, 'VALIDATION_ERROR', 'Unknown organization join code.');
+      }
+      orgId = org.rows[0].id;
+      role = 'viewer';
+    } else if (orgName) {
+      const org = await this.db.query<{ id: string }>('INSERT INTO organizations(name) VALUES($1) RETURNING id', [
+        orgName,
+      ]);
+      orgId = org.rows[0].id;
+      role = 'admin';
+    } else {
+      const org = await this.db.query<{ id: string }>('SELECT id FROM organizations ORDER BY created_at LIMIT 1');
+      orgId = org.rows[0].id;
+      const admins = await this.db.query<{ count: string }>(
+        "SELECT COUNT(*)::int AS count FROM users WHERE password_hash IS NOT NULL AND role = 'admin' AND org_id = $1",
+        [orgId],
+      );
+      role = Number(admins.rows[0]?.count || 0) === 0 ? 'admin' : 'viewer';
+    }
 
     const passwordHash = await bcrypt.hash(password, 10);
 
     let user: { id: string; email: string; display_name: string; role: 'admin' | 'viewer' };
     if (existing.rows[0]) {
       const updated = await this.db.query<typeof user>(
-        `UPDATE users SET display_name = $1, role = $2, password_hash = $3
+        `UPDATE users SET display_name = $1, role = $2, password_hash = $3, org_id = $5
          WHERE id = $4
          RETURNING id, email, display_name, role`,
-        [displayName, role, passwordHash, existing.rows[0].id],
+        [displayName, role, passwordHash, existing.rows[0].id, orgId],
       );
       user = updated.rows[0];
     } else {
       const inserted = await this.db.query<typeof user>(
-        `INSERT INTO users(email, display_name, role, password_hash)
-         VALUES($1, $2, $3, $4)
+        `INSERT INTO users(email, display_name, role, password_hash, org_id)
+         VALUES($1, $2, $3, $4, $5)
          RETURNING id, email, display_name, role`,
-        [email, displayName, role, passwordHash],
+        [email, displayName, role, passwordHash, orgId],
       );
       user = inserted.rows[0];
     }
@@ -210,7 +240,11 @@ export class AuthService {
       [user.id, 50000],
     );
 
-    return { token: this.issueToken(user), user };
+    const org = await this.db.query<{ name: string; join_code: string }>(
+      'SELECT name, join_code FROM organizations WHERE id = $1',
+      [orgId],
+    );
+    return { token: this.issueToken(user), user, organization: org.rows[0] };
   }
 
   async login(email: string, password: string) {
@@ -228,9 +262,14 @@ export class AuthService {
       throwApiError(401, 'VALIDATION_ERROR', 'Invalid email or password.');
     }
 
+    const org = await this.db.query<{ name: string; join_code: string }>(
+      'SELECT o.name, o.join_code FROM organizations o JOIN users u ON u.org_id = o.id WHERE u.id = $1',
+      [user.id],
+    );
     return {
       token: this.issueToken(user),
       user: { id: user.id, email: user.email, display_name: user.display_name, role: user.role },
+      organization: org.rows[0] ?? null,
     };
   }
 
@@ -329,10 +368,13 @@ export class AuthService {
     for (const row of rows.rows) {
       if (await bcrypt.compare(key, row.key_hash)) {
         await this.db.query('UPDATE api_keys SET last_used_at = NOW() WHERE id = $1', [row.id]);
-        const u = await this.db.query<{ id: string; email: string; display_name: string; role: 'admin' | 'viewer' }>(
-          'SELECT id, email, display_name, role FROM users WHERE id = $1',
-          [row.user_id],
-        );
+        const u = await this.db.query<{
+          id: string;
+          email: string;
+          display_name: string;
+          role: 'admin' | 'viewer';
+          org_id: string | null;
+        }>('SELECT id, email, display_name, role, org_id FROM users WHERE id = $1', [row.user_id]);
         const user = u.rows[0];
         if (!user) {
           return null;
@@ -343,6 +385,7 @@ export class AuthService {
           displayName: user.display_name,
           role: user.role,
           scopes: await this.getScopes(user.id),
+          orgId: user.org_id,
         };
       }
     }

@@ -8,6 +8,25 @@ const BASE = process.argv[2] || 'http://localhost:3000';
 const EMAIL = 'eval@factorypilot.demo';
 const PASSWORD = 'eval-Pass-123!';
 
+// Feedback-flywheel cases (beta): admin-promoted questions from /api/agents/eval-cases
+// are appended at runtime so the suite grows with real user feedback.
+async function loadPromotedCases(base, token) {
+  if (!token) return [];
+  try {
+    const res = await fetch(`${base}/api/agents/eval-cases`, { headers: { Authorization: `Bearer ${token}` } });
+    if (!res.ok) return [];
+    const rows = await res.json();
+    return rows.map((r) => ({
+      q: r.question,
+      tools: [],
+      expectSubstring: r.expect_substring || undefined,
+      promoted: true,
+    }));
+  } catch {
+    return [];
+  }
+}
+
 const CASES = [
   { q: 'show stock for material MAT-10023456 in warehouse 1010', tools: ['getStockLevel'] },
   { q: 'what stock does warehouse 1020 hold?', tools: ['listWarehouseStock'] },
@@ -78,7 +97,13 @@ async function main() {
   let passed = 0;
   const failures = [];
 
-  for (const [i, testCase] of CASES.entries()) {
+  const promoted = await loadPromotedCases(BASE, token);
+  if (promoted.length > 0) {
+    console.log(`+ ${promoted.length} promoted case(s) from feedback flywheel`);
+  }
+  const ALL_CASES = [...CASES, ...promoted];
+
+  for (const [i, testCase] of ALL_CASES.entries()) {
     const label = `${String(i + 1).padStart(2, '0')} ${testCase.q.slice(0, 60)}`;
     try {
       const res = await api('/api/chat', { method: 'POST', body: JSON.stringify({ message: testCase.q }) }, token);
@@ -99,6 +124,9 @@ async function main() {
       if (testCase.expectPending && !res.body.pendingAction) {
         throw new Error('expected a pending approval but none was returned');
       }
+      if (testCase.expectSubstring && !String(res.body.text || '').toLowerCase().includes(testCase.expectSubstring.toLowerCase())) {
+        throw new Error(`answer missing expected substring "${testCase.expectSubstring}"`);
+      }
       if (latest.status !== 'success') {
         throw new Error(`session log status: ${latest.status}`);
       }
@@ -113,7 +141,7 @@ async function main() {
     await new Promise((resolve) => setTimeout(resolve, 4000));
   }
 
-  console.log(`\n${passed}/${CASES.length} passed`);
+  console.log(`\n${passed}/${ALL_CASES.length} passed`);
   if (failures.length > 0) {
     process.exit(1);
   }
