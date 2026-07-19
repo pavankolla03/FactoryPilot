@@ -12,6 +12,15 @@ export type AgentGoal = {
   last_run_at: string | null;
 };
 
+export type AgentMetrics = {
+  totalRuns: number;
+  completed: number;
+  failed: number;
+  waitingApproval: number;
+  effectivenessPct: number | null;
+  feedback: { up: number; down: number };
+};
+
 export type AgentRun = {
   id: string;
   agent: string;
@@ -52,12 +61,16 @@ export function AutonomyPage({
   onCreateGoal,
   onToggleGoal,
   onRunNow,
+  onSimulate,
+  metrics,
 }: {
   goals: AgentGoal[];
   runs: AgentRun[];
   onCreateGoal: (g: { warehouseId: string; threshold: number; autonomy: string; dailyBudgetQty: number; agent: string }) => Promise<void>;
   onToggleGoal: (id: string, active: boolean) => Promise<void>;
   onRunNow: (warehouseId: string, goalId?: string) => Promise<void>;
+  onSimulate: (warehouseId: string, threshold: number) => Promise<void>;
+  metrics: AgentMetrics | null;
 }) {
   const [warehouseId, setWarehouseId] = useState('1030');
   const [agentType, setAgentType] = useState('replenishment');
@@ -84,6 +97,7 @@ export function AutonomyPage({
             <select className="input !w-44 py-2 text-xs" value={agentType} onChange={(e) => setAgentType(e.target.value)}>
               <option value="replenishment">Replenishment agent</option>
               <option value="cycle_count">Cycle-count planner</option>
+              <option value="rebalance">Rebalancer (beta)</option>
             </select>
             <select className="input !w-32 py-2 text-xs" value={warehouseId} onChange={(e) => setWarehouseId(e.target.value)}>
               {WAREHOUSES.map((w) => (
@@ -140,7 +154,9 @@ export function AutonomyPage({
                 <div className="flex items-center justify-between gap-2">
                   <div className="flex items-center gap-2">
                     <span className="text-sm font-semibold text-fp-ink">WH {g.warehouse_id}</span>
-                    <span className="chip bg-fp-navy text-white">{g.agent === 'cycle_count' ? 'cycle count' : 'replenish'}</span>
+                    <span className="chip bg-fp-navy text-white">
+                      {g.agent === 'cycle_count' ? 'cycle count' : g.agent === 'rebalance' ? 'rebalance' : 'replenish'}
+                    </span>
                     <span className="chip bg-fp-bg text-fp-ink-2">above {g.threshold}</span>
                     <span
                       className={`chip ${
@@ -156,6 +172,13 @@ export function AutonomyPage({
                     <span className="chip bg-fp-bg text-fp-ink-2">budget {g.daily_budget_qty}/day</span>
                   </div>
                   <div className="flex items-center gap-2">
+                    <button
+                      className="btn-ghost px-2.5 py-1.5 text-[11px]"
+                      title="Simulate: observe + plan + projected end-state, zero writes"
+                      onClick={() => void onSimulate(g.warehouse_id, g.threshold)}
+                    >
+                      Dry run
+                    </button>
                     <button
                       className="btn-ghost px-2.5 py-1.5 text-[11px]"
                       onClick={() => void onRunNow(g.warehouse_id, g.id)}
@@ -184,6 +207,30 @@ export function AutonomyPage({
           Agent runs
           <span className="chip bg-fp-accent-soft text-fp-accent-dark">Beta</span>
         </h3>
+        {metrics && metrics.totalRuns > 0 && (
+          <div className="mb-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
+            <div className="rounded-xl border border-fp-line px-3 py-2">
+              <div className="text-lg font-semibold text-fp-ink">{metrics.totalRuns}</div>
+              <div className="text-[10px] uppercase tracking-wider text-fp-ink-3">Runs</div>
+            </div>
+            <div className="rounded-xl border border-fp-line px-3 py-2">
+              <div className="text-lg font-semibold text-fp-good">{metrics.completed}</div>
+              <div className="text-[10px] uppercase tracking-wider text-fp-ink-3">Completed</div>
+            </div>
+            <div className="rounded-xl border border-fp-line px-3 py-2">
+              <div className="text-lg font-semibold text-fp-ink">
+                {metrics.effectivenessPct === null ? '—' : `${metrics.effectivenessPct}%`}
+              </div>
+              <div className="text-[10px] uppercase tracking-wider text-fp-ink-3">Effective</div>
+            </div>
+            <div className="rounded-xl border border-fp-line px-3 py-2">
+              <div className="text-lg font-semibold text-fp-ink">
+                {metrics.feedback.up}<span className="text-fp-ink-3">/</span>{metrics.feedback.down}
+              </div>
+              <div className="text-[10px] uppercase tracking-wider text-fp-ink-3">👍 / 👎</div>
+            </div>
+          </div>
+        )}
         <p className="mb-4 text-xs text-fp-ink-3">
           Every run is a persisted plan → execute → verify episode. Click a run to see its full timeline.
         </p>

@@ -51,4 +51,21 @@ export class ChatController {
   getUsage(@CurrentUser() user: AuthUser) {
     return this.chatService.getUsage(user.id);
   }
+
+  /**
+   * Programmatic Otto (Phase B platform): callable with an x-api-key header.
+   * Returns the final answer without streaming — for external integrations.
+   */
+  @Post('/v1/ask')
+  async ask(@CurrentUser() user: AuthUser, @Body() body: unknown) {
+    const parsed = z.object({ message: z.string().min(1), conversationId: z.string().uuid().optional() }).parse(body);
+    const result = await this.chatService.chat(user, parsed.conversationId, parsed.message);
+    return {
+      conversationId: result.conversationId,
+      answer: result.text,
+      source: result.source,
+      grounded: result.grounded ?? null,
+      pendingAction: result.pendingAction ?? null,
+    };
+  }
 }

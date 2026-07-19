@@ -182,20 +182,27 @@ export class AdminController {
       .object({
         auto_approve_max_qty: z.number().int().positive().nullable().optional(),
         maker_checker: z.boolean().optional(),
+        write_window_start: z.number().int().min(0).max(23).nullable().optional(),
+        write_window_end: z.number().int().min(0).max(24).nullable().optional(),
       })
       .parse(body);
 
     await this.db.query(
-      `INSERT INTO warehouse_policies(warehouse_id, auto_approve_max_qty, maker_checker)
-       VALUES($1, $2, COALESCE($3, false))
+      `INSERT INTO warehouse_policies(warehouse_id, auto_approve_max_qty, maker_checker, write_window_start, write_window_end)
+       VALUES($1, $2, COALESCE($3, false), $5, $6)
        ON CONFLICT (warehouse_id) DO UPDATE SET
          auto_approve_max_qty = CASE WHEN $4 THEN $2 ELSE warehouse_policies.auto_approve_max_qty END,
-         maker_checker = COALESCE($3, warehouse_policies.maker_checker)`,
+         maker_checker = COALESCE($3, warehouse_policies.maker_checker),
+         write_window_start = CASE WHEN $7 THEN $5 ELSE warehouse_policies.write_window_start END,
+         write_window_end = CASE WHEN $7 THEN $6 ELSE warehouse_policies.write_window_end END`,
       [
         warehouseId,
         parsed.auto_approve_max_qty ?? null,
         parsed.maker_checker ?? null,
         parsed.auto_approve_max_qty !== undefined,
+        parsed.write_window_start ?? null,
+        parsed.write_window_end ?? null,
+        parsed.write_window_start !== undefined || parsed.write_window_end !== undefined,
       ],
     );
     const row = await this.db.query('SELECT * FROM warehouse_policies WHERE warehouse_id = $1', [warehouseId]);

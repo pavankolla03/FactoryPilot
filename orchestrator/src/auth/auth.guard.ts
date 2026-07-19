@@ -14,7 +14,11 @@ export class AuthGuard implements CanActivate {
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const request = context.switchToHttp().getRequest<RequestWithUser>();
-    const user = await this.authService.validateBearerToken(request.headers.authorization);
+    // Programmatic access: an x-api-key header authenticates as its owner.
+    const apiKey = request.headers['x-api-key'] as string | undefined;
+    const user = apiKey
+      ? await this.authService.validateApiKey(apiKey)
+      : await this.authService.validateBearerToken(request.headers.authorization);
     if (!user) {
       throw new UnauthorizedException();
     }

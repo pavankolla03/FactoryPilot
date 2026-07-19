@@ -4,7 +4,8 @@ import { io, Socket } from 'socket.io-client';
 import type { PendingAction, SessionLogEntry } from '@manufacturing-agent/shared';
 import { Landing } from './components/Landing';
 import { ApprovalsPage, type ScheduledReport } from './components/ApprovalsPage';
-import { AutonomyPage, type AgentGoal, type AgentRun } from './components/AutonomyPage';
+import { AutonomyPage, type AgentGoal, type AgentMetrics, type AgentRun } from './components/AutonomyPage';
+import { ApiKeysCard } from './components/ApiKeysCard';
 import { BoardPage } from './components/BoardPage';
 import { AuthPage } from './components/AuthPages';
 import { Sidebar, type Tab } from './components/Sidebar';
@@ -70,6 +71,7 @@ function App() {
   const [schedules, setSchedules] = useState<ScheduledReport[]>([]);
   const [agentGoals, setAgentGoals] = useState<AgentGoal[]>([]);
   const [agentRuns, setAgentRuns] = useState<AgentRun[]>([]);
+  const [agentMetrics, setAgentMetrics] = useState<AgentMetrics | null>(null);
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [bellOpen, setBellOpen] = useState(false);
   const bellRef = useRef<HTMLDivElement>(null);
@@ -344,9 +346,14 @@ function App() {
   }
 
   async function loadAgents() {
-    const [goals, runs] = await Promise.all([client.get('/api/agents/goals'), client.get('/api/agents/runs')]);
+    const [goals, runs, metrics] = await Promise.all([
+      client.get('/api/agents/goals'),
+      client.get('/api/agents/runs'),
+      client.get('/api/agents/metrics'),
+    ]);
     setAgentGoals(goals.data);
     setAgentRuns(runs.data);
+    setAgentMetrics(metrics.data);
   }
 
   async function deleteAlert(id: string) {
@@ -523,7 +530,7 @@ function App() {
               withFeedback(async () => {
                 await client.post('/api/agents/goals', g);
                 await loadAgents();
-              }, `Goal created — the ${g.agent === 'cycle_count' ? 'cycle-count planner' : 'replenishment agent'} now watches WH ${g.warehouseId}.`)
+              }, `Goal created — the ${g.agent === 'cycle_count' ? 'cycle-count planner' : g.agent === 'rebalance' ? 'rebalancer' : 'replenishment agent'} now watches WH ${g.warehouseId}.`)
             }
             onToggleGoal={(id, active) =>
               withFeedback(async () => {
@@ -537,6 +544,20 @@ function App() {
                 await loadAgents();
               }, 'Run started — watch the timeline update live.')
             }
+            onSimulate={async (warehouseId, threshold) => {
+              try {
+                const res = await client.post('/api/agents/simulate', { warehouseId, threshold });
+                const d = res.data;
+                showToast(
+                  d.lowPositions === 0
+                    ? `Dry run WH ${warehouseId}: all positions healthy — the agent would do nothing.`
+                    : `Dry run WH ${warehouseId}: would order ${d.totalUnitsToOrder} units across ${d.projected.filter((p: { suggestedOrderQty: number }) => p.suggestedOrderQty > 0).length} material(s). Zero writes performed.`,
+                );
+              } catch {
+                showToast('Dry run failed — check your write scope for this warehouse.');
+              }
+            }}
+            metrics={agentMetrics}
           />
         )}
 
@@ -558,13 +579,16 @@ function App() {
         )}
 
         {tab === 'usage' && (
-          <AnalyticsPage
-            usage={usage}
-            tokenRows={tokenRows}
-            sessionLogs={sessionLogs}
-            isAdmin={role === 'admin'}
-            onExport={() => void exportCsv('/api/token-usage/export.csv', 'factorypilot-token-usage.csv')}
-          />
+          <div className="space-y-5">
+            <AnalyticsPage
+              usage={usage}
+              tokenRows={tokenRows}
+              sessionLogs={sessionLogs}
+              isAdmin={role === 'admin'}
+              onExport={() => void exportCsv('/api/token-usage/export.csv', 'factorypilot-token-usage.csv')}
+            />
+            <ApiKeysCard client={client} />
+          </div>
         )}
 
         {tab === 'logs' && (

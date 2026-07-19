@@ -66,8 +66,8 @@ export class AgentsService {
       validationError("autonomy must be 'observe', 'propose', or 'act'");
     }
     const agent = args.agent || 'replenishment';
-    if (!['replenishment', 'cycle_count'].includes(agent)) {
-      validationError("agent must be 'replenishment' or 'cycle_count'");
+    if (!['replenishment', 'cycle_count', 'rebalance'].includes(agent)) {
+      validationError("agent must be 'replenishment', 'cycle_count', or 'rebalance'");
     }
     const row = await this.db.query<AgentGoal>(
       `INSERT INTO agent_goals(user_id, agent, warehouse_id, threshold, autonomy, daily_budget_qty)
@@ -132,7 +132,9 @@ export class AgentsService {
     const goalText =
       agent === 'cycle_count'
         ? `Weekly cycle-count plan for warehouse ${options.warehouseId} (trigger: ${options.trigger})`
-        : `Keep warehouse ${options.warehouseId} stocked above ${threshold} (autonomy: ${autonomy}, trigger: ${options.trigger})`;
+        : agent === 'rebalance'
+          ? `Rebalance warehouse ${options.warehouseId}: feed starved downstream locations from surplus (autonomy: ${autonomy}, trigger: ${options.trigger})`
+          : `Keep warehouse ${options.warehouseId} stocked above ${threshold} (autonomy: ${autonomy}, trigger: ${options.trigger})`;
 
     const runRow = await this.db.query<{ id: string }>(
       `INSERT INTO agent_runs(goal_id, user_id, agent, warehouse_id, goal_text, status)
@@ -146,12 +148,19 @@ export class AgentsService {
     const executor =
       agent === 'cycle_count'
         ? this.executeCycleCount(runId, options.userId, { warehouseId: options.warehouseId })
-        : this.executeReplenishment(runId, options.userId, options.displayName, {
-            warehouseId: options.warehouseId,
-            threshold,
-            autonomy,
-            budget,
-          });
+        : agent === 'rebalance'
+          ? this.executeRebalance(runId, options.userId, options.displayName, {
+              warehouseId: options.warehouseId,
+              threshold,
+              autonomy,
+              budget,
+            })
+          : this.executeReplenishment(runId, options.userId, options.displayName, {
+              warehouseId: options.warehouseId,
+              threshold,
+              autonomy,
+              budget,
+            });
 
     // Fire-and-forget so API callers get the run id immediately.
     void executor.catch(async (error) => {
@@ -257,7 +266,12 @@ export class AgentsService {
       return;
     }
 
-    if (cfg.autonomy === 'act' && totalQty <= cfg.budget && !critic.flagged) {
+    const withinWindow = await this.withinChangeWindow(cfg.warehouseId);
+    if (!withinWindow) {
+      await this.addStep(runId, 'info', 'Outside the warehouse change window — auto-act disabled, routing to approval.', 'ok');
+    }
+
+    if (cfg.autonomy === 'act' && totalQty <= cfg.budget && !critic.flagged && withinWindow) {
       for (const s of suggestions) {
         const result = (await this.mcp.callTool('draftPurchaseRequisition', {
           materialId: s.materialId,
@@ -336,6 +350,154 @@ export class AgentsService {
       'Replenishment plan awaiting approval',
       `WH ${cfg.warehouseId}: ${action.humanSummary}\nOne-click approve (beta): ${this.quickApproveLink(action.actionId, userId)}`,
     );
+  }
+
+  /**
+   * REBALANCER (beta): within one warehouse, feed starved downstream locations
+   * (packing/shipping below threshold) from upstream surplus (bulk/receiving/
+   * inspection above 2× threshold). Proposes moveStock through the same
+   * approval/anomaly/budget machinery as every other write.
+   */
+  private async executeRebalance(
+    runId: string,
+    userId: string,
+    displayName: string,
+    cfg: { warehouseId: string; threshold: number; autonomy: string; budget: number },
+  ) {
+    const stock = (await this.mcp.callTool('listWarehouseStock', { warehouseId: cfg.warehouseId })) as {
+      structuredContent?: { records?: Array<Record<string, unknown>> };
+    };
+    const records = (stock.structuredContent?.records ?? []) as Array<Record<string, unknown>>;
+    await this.addStep(runId, 'observe', `Observed ${records.length} stock position(s) in WH ${cfg.warehouseId}.`, 'ok');
+
+    // Group locations by product: a starved location of a product is fed from
+    // the same product's most abundant other location (products are not
+    // substitutable, so rebalancing is always within one product).
+    const byProduct = new Map<string, Array<{ location: string; qty: number }>>();
+    for (const r of records) {
+      const productId = String(r.productId || r.materialId);
+      const list = byProduct.get(productId) ?? [];
+      list.push({ location: String(r.location).toLowerCase(), qty: Number(r.quantity || 0) });
+      byProduct.set(productId, list);
+    }
+
+    const moves: Array<{ productId: string; fromLocation: string; toLocation: string; qty: number }> = [];
+    for (const [productId, locs] of byProduct) {
+      const starved = locs.find((l) => l.qty < cfg.threshold);
+      const surplus = locs
+        .filter((l) => l !== starved && l.qty > cfg.threshold * 2)
+        .sort((a, b) => b.qty - a.qty)[0];
+      if (starved && surplus) {
+        const deficit = cfg.threshold * 2 - starved.qty;
+        const available = surplus.qty - cfg.threshold * 2;
+        const qty = Math.max(Math.min(deficit, available), 0);
+        if (qty > 0) {
+          moves.push({ productId, fromLocation: surplus.location, toLocation: starved.location, qty });
+        }
+      }
+    }
+
+    await this.addStep(
+      runId,
+      'plan',
+      `Rebalance plan: ${moves.length} move(s) — ` +
+        (moves.map((m) => `${m.qty} ${m.productId} ${m.fromLocation}→${m.toLocation}`).join(', ') || 'nothing to rebalance'),
+      'ok',
+    );
+
+    if (moves.length === 0) {
+      await this.finishRun(runId, 'completed', 'Downstream locations are adequately stocked — no rebalancing needed.');
+      return;
+    }
+
+    const totalQty = moves.reduce((sum, m) => sum + m.qty, 0);
+
+    if (cfg.autonomy === 'observe') {
+      await this.finishRun(runId, 'completed', `Observed: would rebalance ${totalQty} units across ${moves.length} move(s).`);
+      return;
+    }
+
+    const withinWindow = await this.withinChangeWindow(cfg.warehouseId);
+    if (cfg.autonomy === 'act' && totalQty <= cfg.budget && withinWindow) {
+      for (const m of moves) {
+        await this.executeWriteToolExternal('moveStock', { ...m, warehouseId: cfg.warehouseId });
+        await this.addStep(runId, 'act', `Moved ${m.qty} × ${m.productId} ${m.fromLocation}→${m.toLocation}`, 'ok');
+      }
+      await this.finishRun(runId, 'completed', `Auto-rebalanced ${moves.length} move(s), ${totalQty} units.`);
+      await this.recordEpisode(`wh:${cfg.warehouseId}`, `Auto-rebalanced ${moves.length} move(s) (${totalQty} units).`);
+      await this.notifyOwner(userId, 'Rebalance run completed', `WH ${cfg.warehouseId}: auto-rebalanced ${totalQty} units.`);
+      return;
+    }
+
+    const policy = await this.makerCheckerFor(userId, cfg.warehouseId);
+    const escalation = !withinWindow ? ' Outside the warehouse change window — escalated to human approval.' : '';
+    const action: PendingAction = {
+      actionId: randomUUID(),
+      tool: 'batch',
+      params: {
+        steps: moves.map((m) => ({ tool: 'moveStock', params: { ...m, warehouseId: cfg.warehouseId } })),
+      },
+      humanSummary: `Rebalance WH ${cfg.warehouseId}: ${moves
+        .map((m) => `${m.qty} ${m.productId} ${m.fromLocation}→${m.toLocation}`)
+        .join(', ')}`,
+      requestedBy: `Rebalancer Agent (for ${displayName})`,
+      requestedById: userId,
+      runId,
+      makerChecker: policy,
+    };
+    await this.redis.raw.setEx(`pending:action:${action.actionId}`, 1200, JSON.stringify({ userId, action }));
+    this.realtime.emitPendingAction(userId, action);
+    await this.addStep(runId, 'approval', `Awaiting approval of ${moves.length} rebalance move(s).${escalation}`, 'pending');
+    await this.setRunStatus(runId, 'waiting_approval');
+    await this.notifyOwner(
+      userId,
+      'Rebalance plan awaiting approval',
+      `WH ${cfg.warehouseId}: ${action.humanSummary}\nOne-click approve (beta): ${this.quickApproveLink(action.actionId, userId)}`,
+    );
+  }
+
+  /** Change window check (Phase D): is the current hour inside the warehouse's write window? */
+  private async withinChangeWindow(warehouseId: string): Promise<boolean> {
+    const row = await this.db.query<{ s: number | null; e: number | null }>(
+      'SELECT write_window_start AS s, write_window_end AS e FROM warehouse_policies WHERE warehouse_id = $1',
+      [warehouseId],
+    );
+    const start = row.rows[0]?.s;
+    const end = row.rows[0]?.e;
+    if (start === null || start === undefined || end === null || end === undefined) {
+      return true; // no window configured → always allowed
+    }
+    const hour = new Date().getHours();
+    return start <= end ? hour >= start && hour < end : hour >= start || hour < end;
+  }
+
+  private async makerCheckerFor(userId: string, warehouseId: string): Promise<boolean> {
+    const row = await this.db.query<{ mc: boolean }>(
+      `SELECT (
+         COALESCE((SELECT maker_checker FROM approval_policies WHERE user_id = $1), false)
+         OR COALESCE((SELECT bool_or(maker_checker) FROM warehouse_policies WHERE warehouse_id = $2), false)
+       ) AS mc`,
+      [userId, warehouseId],
+    );
+    return Boolean(row.rows[0]?.mc);
+  }
+
+  /** Executes a stock-mutating tool and maintains the movements cache (used by act-mode agents). */
+  private async executeWriteToolExternal(tool: string, params: Record<string, unknown>) {
+    const result = await this.mcp.callTool(tool, params);
+    const warehouse = String(params.warehouseId || 'global');
+    const toDelete: string[] = [];
+    for await (const key of this.redis.raw.scanIterator({ MATCH: `cache:*:${warehouse}:*`, COUNT: 200 })) {
+      toDelete.push(key);
+    }
+    if (toDelete.length > 0) {
+      await this.redis.raw.del(toDelete);
+    }
+    const structured = (result?.structuredContent || result) as { movement?: unknown };
+    if (structured.movement) {
+      await this.redis.raw.zAdd(`cache:movements:${warehouse}`, { score: Date.now(), value: JSON.stringify(structured) });
+    }
+    return result;
   }
 
   /**
@@ -489,6 +651,126 @@ export class AgentsService {
       [scopeKeys, limit],
     );
     return rows.rows.map((r) => `[${String(r.created_at).slice(0, 10)}] ${r.summary}`);
+  }
+
+  /**
+   * DRY-RUN SIMULATION (Phase D safety rail): observe + plan + project the
+   * post-state, with ZERO writes and no approval. Answers "what would it do?"
+   */
+  async simulate(userId: string, warehouseId: string, threshold: number) {
+    const [low, pos, prs] = await Promise.all([
+      this.mcp.callTool('getLowStock', { warehouseId, threshold }),
+      this.mcp.callTool('getPurchaseOrders', { warehouseId }),
+      this.mcp.callTool('getPurchaseRequisitions', { warehouseId }),
+    ]);
+    const lowRecords = ((low.structuredContent as { records?: Array<Record<string, unknown>> })?.records ??
+      []) as Array<Record<string, unknown>>;
+    const poRecords = ((pos.structuredContent as { records?: Array<Record<string, unknown>> })?.records ??
+      []) as Array<Record<string, unknown>>;
+    const prRecords = ((prs.structuredContent as { records?: Array<Record<string, unknown>> })?.records ??
+      []) as Array<Record<string, unknown>>;
+    const recentDrafts = new Set(prRecords.map((r) => String(r.materialId)));
+
+    const projected = lowRecords.map((r) => {
+      const materialId = String(r.materialId);
+      const currentQty = Number(r.quantity || 0);
+      const inbound = poRecords
+        .filter((po) => po.materialId === materialId && po.status !== 'delivered')
+        .reduce((sum, po) => sum + Number(po.qty || 0), 0);
+      const target = threshold * 2;
+      const suggestedOrderQty = recentDrafts.has(materialId) ? 0 : Math.max(target - currentQty - inbound, 0);
+      return {
+        materialId,
+        currentQty,
+        inboundQty: inbound,
+        suggestedOrderQty,
+        projectedQty: currentQty + inbound + suggestedOrderQty,
+        note: recentDrafts.has(materialId) ? 'skipped: draft already exists' : suggestedOrderQty === 0 ? 'covered by inbound' : 'would draft',
+      };
+    });
+
+    return {
+      warehouseId,
+      threshold,
+      dryRun: true,
+      lowPositions: lowRecords.length,
+      totalUnitsToOrder: projected.reduce((sum, p) => sum + p.suggestedOrderQty, 0),
+      projected,
+    };
+  }
+
+  /** RUN ANALYTICS (Phase D observability): effectiveness, cost, throughput. */
+  async metrics(userId: string, isAdmin: boolean) {
+    const scope = isAdmin ? '' : 'WHERE user_id = $1';
+    const params = isAdmin ? [] : [userId];
+    const runs = await this.db.query<{
+      total: string;
+      completed: string;
+      failed: string;
+      waiting: string;
+      effective: string;
+      checked: string;
+    }>(
+      `SELECT
+         COUNT(*)::int AS total,
+         COUNT(*) FILTER (WHERE status = 'completed')::int AS completed,
+         COUNT(*) FILTER (WHERE status = 'failed')::int AS failed,
+         COUNT(*) FILTER (WHERE status = 'waiting_approval')::int AS waiting,
+         COUNT(*) FILTER (WHERE outcome LIKE 'Effective%')::int AS effective,
+         COUNT(*) FILTER (WHERE outcome IS NOT NULL)::int AS checked
+       FROM agent_runs ${scope}`,
+      params,
+    );
+    const fb = await this.db.query<{ up: string; down: string }>(
+      `SELECT COUNT(*) FILTER (WHERE rating = 1)::int AS up, COUNT(*) FILTER (WHERE rating = -1)::int AS down
+       FROM feedback ${isAdmin ? '' : 'WHERE user_id = $1'}`,
+      params,
+    );
+    const r = runs.rows[0];
+    const f = fb.rows[0];
+    const checked = Number(r.checked);
+    return {
+      totalRuns: Number(r.total),
+      completed: Number(r.completed),
+      failed: Number(r.failed),
+      waitingApproval: Number(r.waiting),
+      effectivenessPct: checked ? Math.round((Number(r.effective) / checked) * 100) : null,
+      feedback: { up: Number(f.up), down: Number(f.down) },
+    };
+  }
+
+  /** Low-rated chat turns become candidate eval cases (feedback flywheel). */
+  async feedbackReview(userId: string, isAdmin: boolean) {
+    const rows = await this.db.query(
+      `SELECT f.rating, f.comment, f.created_at, u.email,
+              (SELECT content FROM conversation_messages m
+               WHERE m.conversation_id = f.conversation_id AND m.role = 'user'
+               ORDER BY m.created_at DESC LIMIT 1) AS last_question
+       FROM feedback f JOIN users u ON u.id = f.user_id
+       ${isAdmin ? '' : 'WHERE f.user_id = $1'}
+       ORDER BY f.created_at DESC LIMIT 50`,
+      isAdmin ? [] : [userId],
+    );
+    return rows.rows;
+  }
+
+  /** RETENTION (Phase D): daily purge of aged runs, logs, and read notifications. */
+  @Cron('30 3 * * *')
+  async purgeRetention() {
+    const days = Number(process.env.RETENTION_DAYS || 90);
+    const runs = await this.db.query(
+      `DELETE FROM agent_runs WHERE finished_at IS NOT NULL AND finished_at < NOW() - ($1 || ' days')::interval`,
+      [String(days)],
+    );
+    await this.db.query(
+      `DELETE FROM session_logs WHERE created_at < NOW() - ($1 || ' days')::interval`,
+      [String(days)],
+    );
+    await this.db.query(
+      `DELETE FROM notifications WHERE read_at IS NOT NULL AND created_at < NOW() - ($1 || ' days')::interval`,
+      [String(days)],
+    );
+    this.logger.log(`Retention purge (${days}d): removed ${runs.rowCount ?? 0} aged agent runs and stale logs.`);
   }
 
   /** Called by the approval flow when a run-linked action was executed. */

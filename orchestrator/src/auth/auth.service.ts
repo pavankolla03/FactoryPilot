@@ -289,4 +289,63 @@ export class AuthService {
     );
     return rows.rows.map((r) => ({ warehouseId: r.warehouse_id, accessLevel: r.access_level }));
   }
+
+  // ---------- API keys (programmatic Otto access, Phase B) ----------
+
+  async createApiKey(userId: string, name: string) {
+    const secret = `fp_live_${jwt.sign({ r: Math.random() }, this.jwtSecret()).replace(/[^a-zA-Z0-9]/g, '').slice(0, 40)}`;
+    const prefix = secret.slice(0, 12);
+    const keyHash = await bcrypt.hash(secret, 10);
+    const row = await this.db.query<{ id: string; name: string; prefix: string; created_at: string }>(
+      'INSERT INTO api_keys(user_id, name, prefix, key_hash) VALUES($1, $2, $3, $4) RETURNING id, name, prefix, created_at',
+      [userId, name || 'API key', prefix, keyHash],
+    );
+    // The full secret is shown exactly once.
+    return { ...row.rows[0], key: secret };
+  }
+
+  async listApiKeys(userId: string) {
+    const rows = await this.db.query(
+      'SELECT id, name, prefix, created_at, last_used_at FROM api_keys WHERE user_id = $1 AND revoked = false ORDER BY created_at DESC',
+      [userId],
+    );
+    return rows.rows;
+  }
+
+  async revokeApiKey(userId: string, id: string) {
+    await this.db.query('UPDATE api_keys SET revoked = true WHERE id = $1 AND user_id = $2', [id, userId]);
+    return { success: true };
+  }
+
+  async validateApiKey(key: string): Promise<AuthUser | null> {
+    if (!key || !key.startsWith('fp_live_')) {
+      return null;
+    }
+    const prefix = key.slice(0, 12);
+    const rows = await this.db.query<{ id: string; user_id: string; key_hash: string }>(
+      'SELECT id, user_id, key_hash FROM api_keys WHERE prefix = $1 AND revoked = false',
+      [prefix],
+    );
+    for (const row of rows.rows) {
+      if (await bcrypt.compare(key, row.key_hash)) {
+        await this.db.query('UPDATE api_keys SET last_used_at = NOW() WHERE id = $1', [row.id]);
+        const u = await this.db.query<{ id: string; email: string; display_name: string; role: 'admin' | 'viewer' }>(
+          'SELECT id, email, display_name, role FROM users WHERE id = $1',
+          [row.user_id],
+        );
+        const user = u.rows[0];
+        if (!user) {
+          return null;
+        }
+        return {
+          id: user.id,
+          email: user.email,
+          displayName: user.display_name,
+          role: user.role,
+          scopes: await this.getScopes(user.id),
+        };
+      }
+    }
+    return null;
+  }
 }

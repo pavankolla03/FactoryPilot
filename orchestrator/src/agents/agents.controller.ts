@@ -15,7 +15,7 @@ const goalSchema = z.object({
   threshold: z.number().int().positive().optional(),
   autonomy: z.enum(['observe', 'propose', 'act']).optional(),
   dailyBudgetQty: z.number().int().positive().optional(),
-  agent: z.enum(['replenishment', 'cycle_count']).optional(),
+  agent: z.enum(['replenishment', 'cycle_count', 'rebalance']).optional(),
 });
 
 const goalPatchSchema = z.object({
@@ -68,6 +68,27 @@ export class AgentsController {
   @UseGuards(AuthGuard)
   runs(@CurrentUser() user: AuthUser) {
     return this.agents.listRuns(user.id, user.role === 'admin');
+  }
+
+  @Get('/metrics')
+  @UseGuards(AuthGuard)
+  metrics(@CurrentUser() user: AuthUser) {
+    return this.agents.metrics(user.id, user.role === 'admin');
+  }
+
+  @Get('/feedback-review')
+  @UseGuards(AuthGuard)
+  feedbackReview(@CurrentUser() user: AuthUser) {
+    return this.agents.feedbackReview(user.id, user.role === 'admin');
+  }
+
+  /** Dry-run simulation (Phase D): observe + plan + projected end-state, zero writes. */
+  @Post('/simulate')
+  @UseGuards(AuthGuard)
+  async simulate(@CurrentUser() user: AuthUser, @Body() body: unknown) {
+    const parsed = z.object({ warehouseId: z.string().min(1), threshold: z.number().int().positive().optional() }).parse(body);
+    await this.assertWriteScope(user, parsed.warehouseId);
+    return this.agents.simulate(user.id, parsed.warehouseId, parsed.threshold ?? 50);
   }
 
   @Post('/run')
@@ -165,6 +186,51 @@ export class AgentsController {
         (error as { response?: { error?: { message?: string } } }).response?.error?.message ||
         (error instanceof Error ? error.message : 'approval failed');
       return page('Not approved', reason, false);
+    }
+  }
+
+  /**
+   * Slack/Teams interactive approval endpoint (beta). A button's `value` is a
+   * quick-approve JWT (same as the one-click link); clicking it in Slack posts
+   * here and executes the approval. Needs a public URL + a Slack app to be live.
+   */
+  @Post('/integrations/slack/actions')
+  async slackAction(@Body() body: { payload?: string; token?: string }) {
+    try {
+      // Slack posts a form-encoded `payload`; a plain { token } is accepted for testing.
+      const payload = body.payload ? (JSON.parse(body.payload) as { actions?: Array<{ value?: string }> }) : null;
+      const jwtToken = payload?.actions?.[0]?.value || body.token || '';
+      const secret = process.env.AUTH_JWT_SECRET || process.env.MOCK_JWT_SECRET || 'dev-secret';
+      const claims = jwt.verify(jwtToken, secret) as { actionId: string; sub: string; purpose: string };
+      if (claims.purpose !== 'quick-approve') {
+        return { response_type: 'ephemeral', text: 'Invalid approval token.' };
+      }
+      const row = await this.db.query<{ id: string; email: string; display_name: string; role: 'admin' | 'viewer' }>(
+        'SELECT id, email, display_name, role FROM users WHERE id = $1',
+        [claims.sub],
+      );
+      const dbUser = row.rows[0];
+      if (!dbUser) {
+        return { response_type: 'ephemeral', text: 'Unknown user.' };
+      }
+      const scopes = await this.db.query<{ warehouse_id: string; access_level: 'read' | 'write' }>(
+        'SELECT warehouse_id, access_level FROM user_scopes WHERE user_id = $1',
+        [dbUser.id],
+      );
+      const user: AuthUser = {
+        id: dbUser.id,
+        email: dbUser.email,
+        displayName: dbUser.display_name,
+        role: dbUser.role,
+        scopes: scopes.rows.map((s) => ({ warehouseId: s.warehouse_id, accessLevel: s.access_level })),
+      };
+      await this.chatService.confirmAction(user, claims.actionId);
+      return { response_type: 'in_channel', text: `✅ Approved by ${dbUser.display_name}. The operation was executed.` };
+    } catch (error) {
+      const reason =
+        (error as { response?: { error?: { message?: string } } }).response?.error?.message ||
+        (error instanceof Error ? error.message : 'approval failed');
+      return { response_type: 'ephemeral', text: `⚠️ Not approved: ${reason}` };
     }
   }
 

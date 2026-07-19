@@ -193,3 +193,18 @@ CREATE TABLE IF NOT EXISTS episodic_memory (
 );
 
 CREATE INDEX IF NOT EXISTS idx_episodic_scope ON episodic_memory (scope_key, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS api_keys (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  prefix TEXT NOT NULL,
+  key_hash TEXT NOT NULL,
+  revoked BOOLEAN NOT NULL DEFAULT false,
+  created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+  last_used_at TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_api_keys_prefix ON api_keys (prefix) WHERE revoked = false;
+
+ALTER TABLE warehouse_policies ADD COLUMN IF NOT EXISTS write_window_start INT;
+ALTER TABLE warehouse_policies ADD COLUMN IF NOT EXISTS write_window_end INT;

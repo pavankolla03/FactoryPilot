@@ -1,6 +1,8 @@
-import { Body, Controller, Post } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Post, UseGuards } from '@nestjs/common';
 import { z } from 'zod';
 import { AuthService } from './auth.service';
+import { AuthGuard, CurrentUser } from './auth.guard';
+import type { AuthUser } from '../common/types';
 import { throwApiError } from '../common/errors';
 
 const mockSchema = z.object({
@@ -48,5 +50,26 @@ export class AuthController {
       parsed.role,
     );
     return { token, user };
+  }
+
+  // ---------- API keys (programmatic Otto access, Phase B) ----------
+
+  @Get('/api-keys')
+  @UseGuards(AuthGuard)
+  listKeys(@CurrentUser() user: AuthUser) {
+    return this.authService.listApiKeys(user.id);
+  }
+
+  @Post('/api-keys')
+  @UseGuards(AuthGuard)
+  createKey(@CurrentUser() user: AuthUser, @Body() body: unknown) {
+    const parsed = z.object({ name: z.string().min(1).max(60) }).parse(body);
+    return this.authService.createApiKey(user.id, parsed.name);
+  }
+
+  @Delete('/api-keys/:id')
+  @UseGuards(AuthGuard)
+  revokeKey(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.authService.revokeApiKey(user.id, id);
   }
 }
