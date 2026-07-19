@@ -1,8 +1,8 @@
 {
   ".claude/settings.local.json": {
-    "mtime": 1784487266.5225554,
-    "ast_hash": "8b9b5139f531edf041e821b089de26ab",
-    "semantic_hash": "8b9b5139f531edf041e821b089de26ab"
+    "mtime": 1784378299.6847737,
+    "ast_hash": "a14f5720b52b4e8445519a982eece1b1",
+    "semantic_hash": "a14f5720b52b4e8445519a982eece1b1"
   },
   ".eslintrc.cjs": {
     "mtime": 1782986987.989049,
@@ -130,9 +130,9 @@
     "semantic_hash": "f730ac257d2fe94a3bf5912a00ae69c6"
   },
   "frontend/src/App.tsx": {
-    "mtime": 1784472814.602365,
-    "ast_hash": "a0deffc678eb739a9747ca5deb8452ff",
-    "semantic_hash": "a0deffc678eb739a9747ca5deb8452ff"
+    "mtime": 1784354877.726783,
+    "ast_hash": "0d98ab7e21bd1e237e2d1b200a42e99c",
+    "semantic_hash": "0d98ab7e21bd1e237e2d1b200a42e99c"
   },
   "frontend/src/components/ActivityPage.tsx": {
     "mtime": 1784321978.5219283,
@@ -155,9 +155,9 @@
     "semantic_hash": "b0d4edfbaa66188590717669990acd55"
   },
   "frontend/src/components/AutonomyPage.tsx": {
-    "mtime": 1784472751.1671193,
-    "ast_hash": "e49517b9b2c13c12700e41e4ef5c379e",
-    "semantic_hash": "e49517b9b2c13c12700e41e4ef5c379e"
+    "mtime": 1784354877.7251713,
+    "ast_hash": "61a4d0e5e48ad729247d0ede7c5d8686",
+    "semantic_hash": "61a4d0e5e48ad729247d0ede7c5d8686"
   },
   "frontend/src/components/BoardPage.tsx": {
     "mtime": 1784321919.1276085,
@@ -355,9 +355,9 @@
     "semantic_hash": "98c867a3856352944da3e40d6b029e28"
   },
   "orchestrator/src/admin/admin.controller.ts": {
-    "mtime": 1784472703.6114628,
-    "ast_hash": "c5f125ae0125f98da5cc5fc43ea0068b",
-    "semantic_hash": "c5f125ae0125f98da5cc5fc43ea0068b"
+    "mtime": 1784320329.4918456,
+    "ast_hash": "8cbc5f1f7c979cb2ef67c71de82522c2",
+    "semantic_hash": "8cbc5f1f7c979cb2ef67c71de82522c2"
   },
   "orchestrator/src/agents/agents.controller.ts": {
     "mtime": 1784399858.9737263,
@@ -365,9 +365,9 @@
     "semantic_hash": "72034072a6a8eca277fcb23bb8e65391"
   },
   "orchestrator/src/agents/agents.service.ts": {
-    "mtime": 1784473022.3772519,
-    "ast_hash": "0c84343e69d9d66fa83954a227582afd",
-    "semantic_hash": "0c84343e69d9d66fa83954a227582afd"
+    "mtime": 1784399722.9173954,
+    "ast_hash": "b240ace20b5a73ae6e903f4a50208d3e",
+    "semantic_hash": "b240ace20b5a73ae6e903f4a50208d3e"
   },
   "orchestrator/src/alerts/alerts.controller.ts": {
     "mtime": 1784321839.2943358,
@@ -623,10 +623,5 @@
     "mtime": 1784170092.667187,
     "ast_hash": "2e58628eae760ddd4f9c19b6614a9c6a",
     "semantic_hash": "2e58628eae760ddd4f9c19b6614a9c6a"
-  },
-  "frontend/src/components/ApiKeysCard.tsx": {
-    "mtime": 1784472800.314431,
-    "ast_hash": "77e31562379f79a75d358e7a698036e1",
-    "semantic_hash": "77e31562379f79a75d358e7a698036e1"
   }
 }
