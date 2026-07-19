@@ -352,11 +352,15 @@ export class AgentsService {
     this.realtime.emitPendingAction(userId, action);
     await this.addStep(runId, 'approval', `Awaiting human approval of ${suggestions.length} draft(s).${escalation}`, 'pending');
     await this.setRunStatus(runId, 'waiting_approval');
-    await this.notifyOwner(
-      userId,
-      'Replenishment plan awaiting approval',
-      `WH ${cfg.warehouseId}: ${action.humanSummary}\nOne-click approve (beta): ${this.quickApproveLink(action.actionId, userId)}`,
-    );
+    {
+      const { link, blocks } = this.approvalBlocks(action.humanSummary, action.actionId, userId);
+      await this.notifyOwner(
+        userId,
+        'Replenishment plan awaiting approval',
+        `WH ${cfg.warehouseId}: ${action.humanSummary}\nOne-click approve (beta): ${link}`,
+        blocks,
+      );
+    }
   }
 
   /**
@@ -456,11 +460,15 @@ export class AgentsService {
     this.realtime.emitPendingAction(userId, action);
     await this.addStep(runId, 'approval', `Awaiting approval of ${moves.length} rebalance move(s).${escalation}`, 'pending');
     await this.setRunStatus(runId, 'waiting_approval');
-    await this.notifyOwner(
-      userId,
-      'Rebalance plan awaiting approval',
-      `WH ${cfg.warehouseId}: ${action.humanSummary}\nOne-click approve (beta): ${this.quickApproveLink(action.actionId, userId)}`,
-    );
+    {
+      const { link, blocks } = this.approvalBlocks(action.humanSummary, action.actionId, userId);
+      await this.notifyOwner(
+        userId,
+        'Rebalance plan awaiting approval',
+        `WH ${cfg.warehouseId}: ${action.humanSummary}\nOne-click approve (beta): ${link}`,
+        blocks,
+      );
+    }
   }
 
   /** Change window check (Phase D): is the current hour inside the warehouse's write window? */
@@ -729,22 +737,32 @@ export class AgentsService {
   }
 
   /** Announce a pending approval on the owner's webhook with a one-click link (beta). */
-  async announceApproval(userId: string, action: PendingAction) {
-    const link = this.quickApproveLink(action.actionId, userId);
+  /**
+   * Slack Block Kit payload for an approval (beta): in a Slack app with
+   * interactivity pointed at /api/agents/integrations/slack/actions the
+   * Approve button works one-click; plain incoming webhooks ignore blocks
+   * and show the text fallback.
+   */
+  private approvalBlocks(summary: string, actionId: string, userId: string) {
+    const link = this.quickApproveLink(actionId, userId);
     const token = link.split('token=')[1] ?? '';
-    // Slack Block Kit (beta): in a Slack app with interactivity pointed at
-    // /api/agents/integrations/slack/actions this renders a real Approve button;
-    // plain incoming webhooks simply ignore the blocks and show the text.
-    const blocks = [
-      { type: 'section', text: { type: 'mrkdwn', text: `*Approval requested*\n${action.humanSummary}` } },
-      {
-        type: 'actions',
-        elements: [
-          { type: 'button', style: 'primary', text: { type: 'plain_text', text: '✅ Approve' }, action_id: 'fp_quick_approve', value: token },
-          { type: 'button', url: link, text: { type: 'plain_text', text: 'Open approval page' } },
-        ],
-      },
-    ];
+    return {
+      link,
+      blocks: [
+        { type: 'section', text: { type: 'mrkdwn', text: `*Approval requested*\n${summary}` } },
+        {
+          type: 'actions',
+          elements: [
+            { type: 'button', style: 'primary', text: { type: 'plain_text', text: '✅ Approve' }, action_id: 'fp_quick_approve', value: token },
+            { type: 'button', url: link, text: { type: 'plain_text', text: 'Open approval page' } },
+          ],
+        },
+      ],
+    };
+  }
+
+  async announceApproval(userId: string, action: PendingAction) {
+    const { link, blocks } = this.approvalBlocks(action.humanSummary, action.actionId, userId);
     await this.notifyOwner(
       userId,
       'Approval requested',
