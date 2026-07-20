@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { EmptyState, Icon, initialsOf, paths } from './ui';
 import { useI18n } from '../i18n';
 
@@ -8,11 +8,21 @@ export type AdminUser = {
   display_name: string;
   role: 'admin' | 'viewer';
   monthly_token_limit: number;
+  daily_token_limit: number | null;
+  weekly_token_limit: number | null;
+  overage_policy: 'block' | 'warn';
   auto_approve_max_qty: number | null;
   maker_checker: boolean;
   webhook_url: string | null;
   has_password: boolean;
   scopes: Array<{ warehouse_id: string; access_level: 'read' | 'write' }>;
+};
+
+export type QuotaLimits = {
+  monthly_token_limit: number;
+  daily_token_limit: number | null;
+  weekly_token_limit: number | null;
+  overage_policy: 'block' | 'warn';
 };
 
 export type WarehousePolicy = {
@@ -32,17 +42,19 @@ export function UsersPage({
   onWebhook,
   warehousePolicies,
   onWarehousePolicy,
+  cachePoliciesSlot,
 }: {
   users: AdminUser[];
   onCreate: (u: { email: string; display_name: string; role: 'admin' | 'viewer' }) => Promise<void>;
   onDelete: (id: string) => Promise<void>;
-  onQuota: (id: string, limit: number) => Promise<void>;
+  onQuota: (id: string, limits: QuotaLimits) => Promise<void>;
   onScopes: (id: string, scopes: AdminUser['scopes']) => Promise<void>;
   onPolicy: (id: string, maxQty: number | null) => Promise<void>;
   onMakerChecker: (id: string, enabled: boolean) => Promise<void>;
   onWebhook: (id: string, url: string | null) => Promise<void>;
   warehousePolicies: WarehousePolicy[];
   onWarehousePolicy: (warehouseId: string, maxQty: number | null, makerChecker: boolean) => Promise<void>;
+  cachePoliciesSlot?: ReactNode;
 }) {
   const { t } = useI18n();
   const [email, setEmail] = useState('');
@@ -81,6 +93,8 @@ export function UsersPage({
 
       <WarehousePolicies policies={warehousePolicies} onSave={onWarehousePolicy} />
 
+      {cachePoliciesSlot}
+
       {users.length === 0 ? (
         <div className="card">
           <EmptyState icon={paths.users} title="No users yet" />
@@ -116,7 +130,7 @@ function UserCard({
 }: {
   user: AdminUser;
   onDelete: (id: string) => Promise<void>;
-  onQuota: (id: string, limit: number) => Promise<void>;
+  onQuota: (id: string, limits: QuotaLimits) => Promise<void>;
   onScopes: (id: string, scopes: AdminUser['scopes']) => Promise<void>;
   onPolicy: (id: string, maxQty: number | null) => Promise<void>;
   onMakerChecker: (id: string, enabled: boolean) => Promise<void>;
@@ -124,6 +138,9 @@ function UserCard({
 }) {
   const { t } = useI18n();
   const [quota, setQuota] = useState(String(user.monthly_token_limit ?? 50000));
+  const [dailyQuota, setDailyQuota] = useState(user.daily_token_limit == null ? '' : String(user.daily_token_limit));
+  const [weeklyQuota, setWeeklyQuota] = useState(user.weekly_token_limit == null ? '' : String(user.weekly_token_limit));
+  const [overage, setOverage] = useState<'block' | 'warn'>(user.overage_policy || 'block');
   const [policyQty, setPolicyQty] = useState(user.auto_approve_max_qty === null ? '' : String(user.auto_approve_max_qty));
   const [webhook, setWebhook] = useState(user.webhook_url || '');
   const [warehouse, setWarehouse] = useState('');
@@ -163,7 +180,14 @@ function UserCard({
             <span className="text-[11px] text-fp-ink-3">tokens/mo</span>
             <button
               className="rounded-lg bg-fp-accent-soft px-2 py-1 text-[11px] font-semibold text-fp-accent-dark transition hover:bg-fp-accent hover:text-white"
-              onClick={() => void onQuota(user.id, Number(quota) || 50000)}
+              onClick={() =>
+                void onQuota(user.id, {
+                  monthly_token_limit: Number(quota) || 50000,
+                  daily_token_limit: dailyQuota === '' ? null : Number(dailyQuota),
+                  weekly_token_limit: weeklyQuota === '' ? null : Number(weeklyQuota),
+                  overage_policy: overage,
+                })
+              }
             >
               Save
             </button>
@@ -175,6 +199,52 @@ function UserCard({
           >
             <Icon path={paths.trash} size={15} />
           </button>
+        </div>
+      </div>
+
+      <div className="mt-4 border-t border-fp-line pt-4">
+        <div className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-fp-ink-3">
+          Rate limits (day / week / month windows)
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <input
+            className="input !w-32 py-2 text-xs"
+            placeholder="Daily tokens —"
+            value={dailyQuota}
+            onChange={(e) => setDailyQuota(e.target.value.replace(/[^0-9]/g, ''))}
+          />
+          <input
+            className="input !w-32 py-2 text-xs"
+            placeholder="Weekly tokens —"
+            value={weeklyQuota}
+            onChange={(e) => setWeeklyQuota(e.target.value.replace(/[^0-9]/g, ''))}
+          />
+          <select
+            className="input !w-44 py-2 text-xs"
+            value={overage}
+            onChange={(e) => setOverage(e.target.value as 'block' | 'warn')}
+            title="What happens when a limit is hit"
+          >
+            <option value="block">Over limit: block</option>
+            <option value="warn">Over limit: warn & allow</option>
+          </select>
+          <button
+            className="btn-ghost px-3 py-2 text-xs"
+            onClick={() =>
+              void onQuota(user.id, {
+                monthly_token_limit: Number(quota) || 50000,
+                daily_token_limit: dailyQuota === '' ? null : Number(dailyQuota),
+                weekly_token_limit: weeklyQuota === '' ? null : Number(weeklyQuota),
+                overage_policy: overage,
+              })
+            }
+          >
+            <Icon path={paths.check} size={12} strokeWidth={2.4} />
+            Save limits
+          </button>
+          <span className="text-[11px] text-fp-ink-3">
+            Empty = window not enforced. The tightest breached window wins.
+          </span>
         </div>
       </div>
 

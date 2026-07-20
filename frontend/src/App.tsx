@@ -20,9 +20,10 @@ import {
   type StockAlert,
   type TurnStats,
 } from './components/ChatPage';
-import { AnalyticsPage } from './components/AnalyticsPage';
 import { ActivityPage } from './components/ActivityPage';
 import { UsersPage, type AdminUser, type WarehousePolicy } from './components/UsersPage';
+import { CachePoliciesCard } from './components/CachePoliciesCard';
+import { AnalyticsPage, type AnalyticsOverview } from './components/AnalyticsPage';
 import { Icon, PageHeader, paths } from './components/ui';
 import { useI18n } from './i18n';
 
@@ -78,6 +79,7 @@ function App() {
   const [usage, setUsage] = useState({ used: 0, limit: 50000, periodStart: '' });
   const [tab, setTab] = useState<Tab>('chat');
   const [tokenRows, setTokenRows] = useState<any[]>([]);
+  const [analytics, setAnalytics] = useState<AnalyticsOverview | null>(null);
   const [sessionLogs, setSessionLogs] = useState<SessionLogEntry[]>([]);
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [warehousePolicies, setWarehousePolicies] = useState<WarehousePolicy[]>([]);
@@ -368,6 +370,12 @@ function App() {
   async function refreshTokenRows() {
     const res = await client.get('/api/token-usage');
     setTokenRows(res.data);
+    try {
+      const overview = await client.get('/api/analytics/overview');
+      setAnalytics(overview.data);
+    } catch {
+      // analytics endpoint may be unavailable mid-deploy — tiles simply hide
+    }
   }
 
   async function refreshLogs() {
@@ -672,6 +680,7 @@ function App() {
               usage={usage}
               tokenRows={tokenRows}
               sessionLogs={sessionLogs}
+              overview={analytics}
               isAdmin={role === 'admin'}
               onExport={() => void exportCsv('/api/token-usage/export.csv', 'factorypilot-token-usage.csv')}
             />
@@ -704,11 +713,11 @@ function App() {
                 await refreshUsers();
               }, 'User removed.')
             }
-            onQuota={(id, limit) =>
+            onQuota={(id, limits) =>
               withFeedback(async () => {
-                await client.patch(`/api/admin/users/${id}/quota`, { monthly_token_limit: limit });
+                await client.patch(`/api/admin/users/${id}/quota`, limits);
                 await refreshUsers();
-              }, 'Monthly token quota updated.')
+              }, 'Token limits updated.')
             }
             onScopes={(id, scopes) =>
               withFeedback(async () => {
@@ -734,6 +743,7 @@ function App() {
                 await refreshUsers();
               }, url ? 'Webhook saved — notifications will be delivered there.' : 'Webhook removed.')
             }
+            cachePoliciesSlot={<CachePoliciesCard client={client} onSaved={showToast} />}
             warehousePolicies={warehousePolicies}
             onWarehousePolicy={(warehouseId, maxQty, makerChecker) =>
               withFeedback(async () => {

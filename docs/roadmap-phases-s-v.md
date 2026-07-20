@@ -1,5 +1,12 @@
 # FactoryPilot Roadmap — Phases S–V (agentic depth wave)
 
+> **Re-sequenced 2026-07-20** after the PO spec review (see
+> `spec-gap-analysis.md`): Phase T shipped as the *spec-alignment wave*
+> (multi-window rate limits, cache policies, audit enrichment, dashboard
+> KPIs), and the Business Object Registry is the next missing-feature phase.
+> The product-depth phases below (health score, supplier intelligence,
+> slotting) follow after and shift one letter each.
+
 Phases A–R shipped the agentic core, governance, go-live pack, forecasting,
 BYOM routing, autopilot, and the network rebalancer. This wave closes the
 remaining gaps between "impressive agent demo" and "the planning brain a

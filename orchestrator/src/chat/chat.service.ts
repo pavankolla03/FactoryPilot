@@ -173,7 +173,12 @@ export class ChatService {
     return this.quota.getUsage(userId);
   }
 
-  async chat(user: AuthUser, conversationId: string | undefined, message: string): Promise<ChatResponse> {
+  async chat(
+    user: AuthUser,
+    conversationId: string | undefined,
+    message: string,
+    channel: 'chat' | 'api' = 'chat',
+  ): Promise<ChatResponse> {
     const start = Date.now();
     const quotaState = await this.quota.isExceeded(user.id);
     if (quotaState.exceeded) {
@@ -186,10 +191,14 @@ export class ChatService {
         tokensUsed: 0,
         status: 'blocked_quota',
         latencyMs: Date.now() - start,
+        channel,
+        errorDetail: `${quotaState.window} token limit reached`,
       });
-      const resetDate = new Date(quotaState.snapshot.periodStart);
-      resetDate.setMonth(resetDate.getMonth() + 1);
-      quotaExceeded(resetDate.toISOString().slice(0, 10));
+      quotaExceeded(`${quotaState.resetAt} (${quotaState.window} limit)`);
+    }
+    if (quotaState.warned) {
+      // Overage policy 'warn': allow the request but notify once per window per day.
+      void this.notifyQuotaOverage(user.id, quotaState.window ?? 'monthly');
     }
 
     const convId = conversationId || (await this.createConversation(user.id, message));
@@ -221,6 +230,8 @@ export class ChatService {
         tokensUsed: 0,
         status: 'success',
         latencyMs: Date.now() - start,
+        channel,
+        model: 'answer-cache',
       });
       return { conversationId: convId, messageId: msgId, text: cached.text, source: 'cache', grounded: cached.grounded };
     }
@@ -268,6 +279,9 @@ export class ChatService {
     let streamedChars = 0;
     const toolEvents: ChatToolEvent[] = [];
     let roundsUsed = 0;
+    let llmMs = 0;
+    let payloadBytes = 0;
+    const toolMs = () => toolEvents.reduce((sum, e) => sum + (e.ms || 0), 0);
     const statsNow = () => ({
       elapsedMs: Date.now() - start,
       rounds: roundsUsed,
@@ -287,6 +301,7 @@ export class ChatService {
         roundsUsed = round + 1;
         this.realtime.emitChatStatus(user.id, { conversationId: convId, kind: 'thinking', round: round + 1 });
         let completion;
+        const llmStart = Date.now();
         try {
           completion = provider.completeStream
             ? await provider.completeStream(llmMessages, toolDefs, onTextDelta)
@@ -296,6 +311,7 @@ export class ChatService {
           this.logger.warn(`LLM provider call failed, using keyword fallback: ${reason}`);
           return this.handleFallbackWithoutLlm(user, convId, message, start, invokedTools);
         }
+        llmMs += Date.now() - llmStart;
 
         if (!completion.toolCalls?.length) {
           const salvaged = this.salvageToolCallFromText(completion.text);
@@ -364,7 +380,7 @@ export class ChatService {
             try {
               ({ data, cacheHit } = this.isLocalTool(call.name)
                 ? { data: await this.executeLocalTool(user, call.name, call.arguments), cacheHit: false }
-                : await this.readToolWithCache(call.name, call.arguments));
+                : await this.readToolWithCache(call.name, call.arguments, user.id));
             } catch (error) {
               const failed: ChatToolEvent = {
                 id: stepId,
@@ -391,6 +407,7 @@ export class ChatService {
             this.realtime.emitChatStatus(user.id, { conversationId: convId, kind: 'tool_end', ...event });
             source = cacheHit ? 'cache' : source;
             const toolContent = JSON.stringify(data);
+            payloadBytes += toolContent.length;
             llmMessages.push({
               role: 'tool',
               name: call.name,
@@ -532,6 +549,12 @@ export class ChatService {
               tokensUsed: totalTokens,
               status: 'success',
               latencyMs: Date.now() - start,
+              channel,
+              model: lastModelUsed,
+              toolMs: toolMs(),
+              llmMs,
+              payloadBytes,
+              toolsDetail: toolEvents,
             });
 
             return {
@@ -560,6 +583,13 @@ export class ChatService {
         tokensUsed: totalTokens,
         status,
         latencyMs: Date.now() - start,
+        channel,
+        model: lastModelUsed,
+        toolMs: toolMs(),
+        llmMs,
+        payloadBytes,
+        errorDetail: messageText,
+        toolsDetail: toolEvents,
       });
       throw error;
     }
@@ -607,6 +637,12 @@ export class ChatService {
       tokensUsed: totalTokens,
       status: 'success',
       latencyMs: Date.now() - start,
+      channel,
+      model: lastModelUsed,
+      toolMs: toolMs(),
+      llmMs,
+      payloadBytes,
+      toolsDetail: toolEvents,
     });
 
     return {
@@ -712,7 +748,7 @@ export class ChatService {
     }
     this.assertScope(user, warehouseId, 'read');
 
-    const { data, cacheHit } = await this.readToolWithCache('listWarehouseStock', { warehouseId });
+    const { data, cacheHit } = await this.readToolWithCache('listWarehouseStock', { warehouseId }, user.id);
     const structured = (data as { structuredContent?: { records?: unknown[]; dataSource?: string } })
       .structuredContent;
     return {
@@ -744,6 +780,7 @@ export class ChatService {
         conversationId: null,
         queryText: `board-move:${params.productId} ${params.fromLocation}→${params.toLocation} x${params.qty}`,
         toolsInvoked: ['moveStock'],
+        channel: 'board',
         cacheStatus: 'n/a',
         tokensUsed: 0,
         status: 'success',
@@ -775,6 +812,7 @@ export class ChatService {
       conversationId: null,
       queryText: `board-move:${params.productId} ${params.fromLocation}→${params.toLocation} x${params.qty}`,
       toolsInvoked: ['moveStock'],
+      channel: 'board',
       cacheStatus: 'n/a',
       tokensUsed: 0,
       status: 'success',
@@ -1347,15 +1385,47 @@ export class ChatService {
     return !!properties?.warehouseId;
   }
 
-  private async readToolWithCache(toolName: string, params: Record<string, unknown>) {
+  /** Per-tool cache policies (spec alignment), admin-editable, refreshed every 30s. */
+  private cachePolicyState: {
+    at: number;
+    map: Map<string, { enabled: boolean; ttl_seconds: number | null; key_strategy: string }>;
+  } = { at: 0, map: new Map() };
+
+  private async getCachePolicy(toolName: string) {
+    if (Date.now() - this.cachePolicyState.at > 30_000) {
+      try {
+        const rows = await this.db.query<{
+          tool_name: string;
+          enabled: boolean;
+          ttl_seconds: number | null;
+          key_strategy: string;
+        }>('SELECT tool_name, enabled, ttl_seconds, key_strategy FROM cache_policies');
+        this.cachePolicyState = { at: Date.now(), map: new Map(rows.rows.map((r) => [r.tool_name, r])) };
+      } catch {
+        this.cachePolicyState.at = Date.now(); // table may not exist yet — fall back to defaults
+      }
+    }
+    return this.cachePolicyState.map.get(toolName);
+  }
+
+  private async readToolWithCache(toolName: string, params: Record<string, unknown>, userId?: string) {
     if (toolName === 'getRecentMovements') {
+      const live = await this.mcp.callTool(toolName, params);
+      return { data: live, cacheHit: false };
+    }
+
+    const policy = await this.getCachePolicy(toolName);
+    if (policy && !policy.enabled) {
       const live = await this.mcp.callTool(toolName, params);
       return { data: live, cacheHit: false };
     }
 
     const warehouseKey = (params.warehouseId as string | undefined) || 'global';
     const paramsHash = this.sortedHash(params);
-    const cacheKey = `cache:${toolName}:${warehouseKey}:${paramsHash}`;
+    // per_user strategy keeps the user segment after the warehouse so the
+    // warehouse-wide invalidation pattern (cache:*:{wh}:*) still matches.
+    const userPart = policy?.key_strategy === 'per_user' && userId ? `u:${userId}:` : '';
+    const cacheKey = `cache:${toolName}:${warehouseKey}:${userPart}${paramsHash}`;
 
     const hit = await this.redis.raw.get(cacheKey);
     if (hit) {
@@ -1363,7 +1433,7 @@ export class ChatService {
     }
 
     const live = await this.mcp.callTool(toolName, params);
-    await this.redis.raw.setEx(cacheKey, this.cacheTtlSeconds, JSON.stringify(live));
+    await this.redis.raw.setEx(cacheKey, policy?.ttl_seconds || this.cacheTtlSeconds, JSON.stringify(live));
     return { data: live, cacheHit: false };
   }
 
@@ -1504,6 +1574,13 @@ export class ChatService {
     tokensUsed: number;
     status: 'success' | 'error' | 'blocked_scope' | 'blocked_quota';
     latencyMs: number;
+    channel?: 'chat' | 'api' | 'board';
+    model?: string;
+    toolMs?: number;
+    llmMs?: number;
+    payloadBytes?: number;
+    errorDetail?: string;
+    toolsDetail?: unknown;
   }) {
     const row = await this.db.query<SessionLogEntry>(
       `INSERT INTO session_logs(
@@ -1514,8 +1591,15 @@ export class ChatService {
           cache_status,
           tokens_used,
           status,
-          latency_ms
-       ) VALUES($1, $2, $3, $4::jsonb, $5, $6, $7, $8)
+          latency_ms,
+          channel,
+          model,
+          tool_ms,
+          llm_ms,
+          payload_bytes,
+          error_detail,
+          tools_detail
+       ) VALUES($1, $2, $3, $4::jsonb, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15::jsonb)
        RETURNING *`,
       [
         args.userId,
@@ -1526,10 +1610,39 @@ export class ChatService {
         args.tokensUsed,
         args.status,
         args.latencyMs,
+        args.channel ?? 'chat',
+        args.model || null,
+        args.toolMs ?? null,
+        args.llmMs ?? null,
+        args.payloadBytes ?? null,
+        args.errorDetail || null,
+        args.toolsDetail ? JSON.stringify(args.toolsDetail) : null,
       ],
     );
 
     this.realtime.emitSessionLog(row.rows[0]);
+  }
+
+  /** Overage policy 'warn': one in-app notification per breached window per day. */
+  private async notifyQuotaOverage(userId: string, window: string) {
+    try {
+      const key = `quota:warned:${userId}:${window}:${new Date().toISOString().slice(0, 10)}`;
+      const first = await this.redis.raw.set(key, '1', { NX: true, EX: 86400 });
+      if (first !== 'OK') {
+        return;
+      }
+      const row = await this.db.query(
+        'INSERT INTO notifications(user_id, title, body) VALUES($1, $2, $3) RETURNING *',
+        [
+          userId,
+          'Token budget exceeded',
+          `You are over your ${window} token budget. Requests are still allowed because your overage policy is set to "warn".`,
+        ],
+      );
+      this.realtime.emitNotification(userId, row.rows[0]);
+    } catch {
+      // Never let a courtesy warning break the chat path.
+    }
   }
 
   /** Outcome-routing ledger survives restarts: rebuild it from Redis at boot. */

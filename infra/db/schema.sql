@@ -241,3 +241,24 @@ CREATE INDEX IF NOT EXISTS idx_user_models_user ON user_models (user_id) WHERE a
 ALTER TABLE organizations ADD COLUMN IF NOT EXISTS autopilot BOOLEAN NOT NULL DEFAULT false;
 
 ALTER TABLE user_models ADD COLUMN IF NOT EXISTS purpose TEXT NOT NULL DEFAULT 'chat';
+
+-- Phase T (spec alignment): multi-window rate limits, per-tool cache policies, audit enrichment.
+ALTER TABLE user_quota ADD COLUMN IF NOT EXISTS daily_token_limit INT;
+ALTER TABLE user_quota ADD COLUMN IF NOT EXISTS weekly_token_limit INT;
+ALTER TABLE user_quota ADD COLUMN IF NOT EXISTS overage_policy TEXT NOT NULL DEFAULT 'block';
+
+CREATE TABLE IF NOT EXISTS cache_policies (
+  tool_name TEXT PRIMARY KEY,
+  enabled BOOLEAN NOT NULL DEFAULT true,
+  ttl_seconds INT,
+  key_strategy TEXT NOT NULL DEFAULT 'global',
+  updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
+ALTER TABLE session_logs ADD COLUMN IF NOT EXISTS model TEXT;
+ALTER TABLE session_logs ADD COLUMN IF NOT EXISTS channel TEXT NOT NULL DEFAULT 'chat';
+ALTER TABLE session_logs ADD COLUMN IF NOT EXISTS tool_ms INT;
+ALTER TABLE session_logs ADD COLUMN IF NOT EXISTS llm_ms INT;
+ALTER TABLE session_logs ADD COLUMN IF NOT EXISTS payload_bytes INT;
+ALTER TABLE session_logs ADD COLUMN IF NOT EXISTS error_detail TEXT;
+ALTER TABLE session_logs ADD COLUMN IF NOT EXISTS tools_detail JSONB;

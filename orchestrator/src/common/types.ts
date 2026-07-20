@@ -21,8 +21,18 @@ export interface RequestWithUser {
   user: AuthUser;
 }
 
+export interface QuotaWindow {
+  window: 'daily' | 'weekly' | 'monthly';
+  used: number;
+  limit: number;
+}
+
 export interface UsageSnapshot {
   used: number;
   limit: number;
   periodStart: string;
+  /** Configured limit windows, tightest first (daily, weekly, monthly). */
+  windows?: QuotaWindow[];
+  /** 'block' rejects over-limit requests; 'warn' allows them but notifies. */
+  overagePolicy?: 'block' | 'warn';
 }

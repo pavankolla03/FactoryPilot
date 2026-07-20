@@ -86,10 +86,76 @@ export class LogsController {
     return rows.rows;
   }
 
+  /**
+   * Spec-alignment KPIs (Phase T): throughput, cache ratio, rejections,
+   * latency split and top questions over the last N days. Admins see their
+   * whole org; everyone else sees their own traffic.
+   */
+  @Get('/analytics/overview')
+  async analyticsOverview(@CurrentUser() user: AuthUser, @Query('days') days?: string) {
+    const windowDays = Math.min(Math.max(Number(days) || 14, 1), 90);
+    const scope =
+      user.role === 'admin'
+        ? 'user_id IN (SELECT id FROM users WHERE org_id = (SELECT org_id FROM users WHERE id = $1))'
+        : 'user_id = $1';
+    const base = `FROM session_logs WHERE ${scope} AND created_at >= NOW() - ($2 || ' days')::interval`;
+    const params = [user.id, String(windowDays)];
+
+    const [perDay, byTool, byChannel, totals, topQuestions] = await Promise.all([
+      this.db.query(
+        `SELECT DATE(created_at) AS day,
+                COUNT(*)::int AS requests,
+                COUNT(*) FILTER (WHERE status = 'blocked_quota')::int AS rejected,
+                COUNT(*) FILTER (WHERE cache_status = 'hit')::int AS cache_hits
+         ${base} GROUP BY DATE(created_at) ORDER BY day`,
+        params,
+      ),
+      this.db.query(
+        `SELECT tool, COUNT(*)::int AS calls
+         FROM (SELECT jsonb_array_elements_text(tools_invoked_json) AS tool ${base}) t
+         GROUP BY tool ORDER BY calls DESC LIMIT 12`,
+        params,
+      ),
+      this.db.query(
+        `SELECT COALESCE(channel, 'chat') AS channel, COUNT(*)::int AS requests ${base} GROUP BY channel`,
+        params,
+      ),
+      this.db.query(
+        `SELECT COUNT(*)::int AS requests,
+                COUNT(*) FILTER (WHERE cache_status = 'hit')::int AS cache_hits,
+                COUNT(*) FILTER (WHERE cache_status = 'miss')::int AS cache_misses,
+                COUNT(*) FILTER (WHERE status = 'blocked_quota')::int AS rejected,
+                COUNT(*) FILTER (WHERE status = 'error')::int AS errors,
+                ROUND(AVG(latency_ms))::int AS avg_latency_ms,
+                ROUND(AVG(latency_ms) FILTER (WHERE cache_status = 'hit'))::int AS avg_cache_hit_ms,
+                ROUND(AVG(tool_ms))::int AS avg_tool_ms,
+                ROUND(AVG(llm_ms))::int AS avg_llm_ms
+         ${base}`,
+        params,
+      ),
+      this.db.query(
+        `SELECT LOWER(query_text) AS question, COUNT(*)::int AS times
+         ${base} AND query_text NOT LIKE 'confirm-action:%' AND query_text NOT LIKE 'board-%'
+         GROUP BY LOWER(query_text) ORDER BY times DESC LIMIT 8`,
+        params,
+      ),
+    ]);
+
+    return {
+      windowDays,
+      perDay: perDay.rows,
+      byTool: byTool.rows,
+      byChannel: byChannel.rows,
+      totals: totals.rows[0],
+      topQuestions: topQuestions.rows,
+    };
+  }
+
   @Get('/session-logs/export.csv')
   async sessionLogsCsv(@CurrentUser() user: AuthUser, @Res() res: Response) {
     const rows = await this.db.query(
-      `SELECT created_at, query_text, status, tools_invoked_json::text AS tools, cache_status, tokens_used, latency_ms
+      `SELECT created_at, query_text, status, tools_invoked_json::text AS tools, cache_status, tokens_used, latency_ms,
+              channel, model, tool_ms, llm_ms, payload_bytes, error_detail
        FROM session_logs
        WHERE user_id = $1
        ORDER BY created_at DESC
@@ -104,6 +170,12 @@ export class LogsController {
       'cache_status',
       'tokens_used',
       'latency_ms',
+      'channel',
+      'model',
+      'tool_ms',
+      'llm_ms',
+      'payload_bytes',
+      'error_detail',
     ]);
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', 'attachment; filename="factorypilot-activity.csv"');

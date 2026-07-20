@@ -25,6 +25,15 @@ const scopesSchema = z.object({
 
 const quotaSchema = z.object({
   monthly_token_limit: z.number().int().positive(),
+  daily_token_limit: z.number().int().positive().nullable().optional(),
+  weekly_token_limit: z.number().int().positive().nullable().optional(),
+  overage_policy: z.enum(['block', 'warn']).optional(),
+});
+
+const cachePolicySchema = z.object({
+  enabled: z.boolean().optional(),
+  ttl_seconds: z.number().int().positive().nullable().optional(),
+  key_strategy: z.enum(['global', 'per_user']).optional(),
 });
 
 @Controller('/api/admin/users')
@@ -41,6 +50,9 @@ export class AdminController {
               u.role,
               u.created_at,
               COALESCE(q.monthly_token_limit, 50000) AS monthly_token_limit,
+              q.daily_token_limit,
+              q.weekly_token_limit,
+              COALESCE(q.overage_policy, 'block') AS overage_policy,
               p.auto_approve_max_qty,
               COALESCE(p.maker_checker, false) AS maker_checker,
               u.webhook_url,
@@ -192,18 +204,76 @@ export class AdminController {
   async updateQuota(@Param('id') id: string, @Body() body: unknown) {
     const parsed = quotaSchema.parse(body);
     await this.db.query(
-      `INSERT INTO user_quota(user_id, monthly_token_limit, period_start)
-       VALUES($1, $2, CURRENT_DATE)
+      `INSERT INTO user_quota(user_id, monthly_token_limit, daily_token_limit, weekly_token_limit, overage_policy, period_start)
+       VALUES($1, $2, $3, $4, COALESCE($5, 'block'), CURRENT_DATE)
        ON CONFLICT (user_id)
-       DO UPDATE SET monthly_token_limit = EXCLUDED.monthly_token_limit`,
-      [id, parsed.monthly_token_limit],
+       DO UPDATE SET monthly_token_limit = EXCLUDED.monthly_token_limit,
+         daily_token_limit = CASE WHEN $6 THEN $3 ELSE user_quota.daily_token_limit END,
+         weekly_token_limit = CASE WHEN $7 THEN $4 ELSE user_quota.weekly_token_limit END,
+         overage_policy = COALESCE($5, user_quota.overage_policy)`,
+      [
+        id,
+        parsed.monthly_token_limit,
+        parsed.daily_token_limit ?? null,
+        parsed.weekly_token_limit ?? null,
+        parsed.overage_policy ?? null,
+        parsed.daily_token_limit !== undefined,
+        parsed.weekly_token_limit !== undefined,
+      ],
     );
 
     const quota = await this.db.query(
-      'SELECT user_id, monthly_token_limit, period_start FROM user_quota WHERE user_id = $1',
+      `SELECT user_id, monthly_token_limit, daily_token_limit, weekly_token_limit, overage_policy, period_start
+       FROM user_quota WHERE user_id = $1`,
       [id],
     );
     return quota.rows[0];
+  }
+
+  /**
+   * Per-tool cache policies (spec alignment). The tool list is data-driven:
+   * every read tool that ever appeared in session logs, plus explicit rows.
+   */
+  @Get('/cache-policies/list')
+  async listCachePolicies() {
+    const rows = await this.db.query(
+      `SELECT t.tool_name,
+              COALESCE(p.enabled, true) AS enabled,
+              p.ttl_seconds,
+              COALESCE(p.key_strategy, 'global') AS key_strategy,
+              (p.tool_name IS NOT NULL) AS configured
+       FROM (
+         SELECT DISTINCT jsonb_array_elements_text(tools_invoked_json) AS tool_name FROM session_logs
+         UNION
+         SELECT tool_name FROM cache_policies
+       ) t
+       LEFT JOIN cache_policies p ON p.tool_name = t.tool_name
+       ORDER BY t.tool_name`,
+    );
+    return rows.rows;
+  }
+
+  @Patch('/cache-policies/:toolName')
+  async updateCachePolicy(@Param('toolName') toolName: string, @Body() body: unknown) {
+    const parsed = cachePolicySchema.parse(body);
+    await this.db.query(
+      `INSERT INTO cache_policies(tool_name, enabled, ttl_seconds, key_strategy)
+       VALUES($1, COALESCE($2, true), $3, COALESCE($4, 'global'))
+       ON CONFLICT (tool_name) DO UPDATE SET
+         enabled = COALESCE($2, cache_policies.enabled),
+         ttl_seconds = CASE WHEN $5 THEN $3 ELSE cache_policies.ttl_seconds END,
+         key_strategy = COALESCE($4, cache_policies.key_strategy),
+         updated_at = NOW()`,
+      [
+        toolName,
+        parsed.enabled ?? null,
+        parsed.ttl_seconds ?? null,
+        parsed.key_strategy ?? null,
+        parsed.ttl_seconds !== undefined,
+      ],
+    );
+    const row = await this.db.query('SELECT * FROM cache_policies WHERE tool_name = $1', [toolName]);
+    return row.rows[0];
   }
 
   @Patch('/:id/policy')
