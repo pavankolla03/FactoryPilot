@@ -92,6 +92,7 @@ export class AuthController {
         baseUrl: z.string().url().max(300),
         modelId: z.string().min(1).max(120),
         apiKey: z.string().min(1).max(500),
+        purpose: z.enum(['chat', 'critic']).optional(),
       })
       .parse(body);
     return this.authService.addUserModel(user.id, parsed);

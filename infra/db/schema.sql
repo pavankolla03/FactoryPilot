@@ -239,3 +239,5 @@ CREATE TABLE IF NOT EXISTS user_models (
 );
 CREATE INDEX IF NOT EXISTS idx_user_models_user ON user_models (user_id) WHERE active = true;
 ALTER TABLE organizations ADD COLUMN IF NOT EXISTS autopilot BOOLEAN NOT NULL DEFAULT false;
+
+ALTER TABLE user_models ADD COLUMN IF NOT EXISTS purpose TEXT NOT NULL DEFAULT 'chat';

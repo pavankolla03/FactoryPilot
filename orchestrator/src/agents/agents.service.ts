@@ -9,6 +9,7 @@ import { RealtimeGateway } from '../realtime/realtime.gateway';
 import { LlmProviderFactory } from '../llm/provider.factory';
 import { validationError } from '../common/errors';
 import { holtForecast, reorderPoint, toDailySeries } from './forecast';
+import { openSecret } from '../common/secret-box';
 import jwt from 'jsonwebtoken';
 
 export interface AgentGoal {
@@ -283,7 +284,7 @@ export class AgentsService {
     const totalQty = suggestions.reduce((sum, s) => sum + s.suggestedOrderQty, 0);
 
     // 2b. CRITIC (beta) — a second model pass reviews the plan before any action.
-    const critic = await this.criticReview(cfg.warehouseId, suggestions, poRecords, prRecords);
+    const critic = await this.criticReview(userId, cfg.warehouseId, suggestions, poRecords, prRecords);
     await this.addStep(runId, 'critic', critic.detail, critic.flagged ? 'failed' : 'ok');
 
     // 3. ACT — according to the autonomy level and blast-radius budget.
@@ -632,10 +633,17 @@ export class AgentsService {
    * output is a notification/webhook, never a write.
    */
   private async executePoFollowup(runId: string, userId: string, warehouseId: string) {
-    const pos = (await this.mcp.callTool('getPurchaseOrders', { warehouseId })) as {
-      structuredContent?: { records?: Array<Record<string, unknown>> };
-    };
-    const records = (pos.structuredContent?.records ?? []) as Array<Record<string, unknown>>;
+    const [pos, sup] = await Promise.all([
+      this.mcp.callTool('getPurchaseOrders', { warehouseId }),
+      this.mcp.callTool('getSuppliers', {}),
+    ]);
+    const supplierByName = new Map(
+      (((sup.structuredContent as { records?: Array<Record<string, unknown>> })?.records ?? []) as Array<
+        Record<string, unknown>
+      >).map((s) => [String(s.name), s]),
+    );
+    const records = ((pos.structuredContent as { records?: Array<Record<string, unknown>> })?.records ??
+      []) as Array<Record<string, unknown>>;
     await this.addStep(runId, 'observe', `Observed ${records.length} purchase order(s) for WH ${warehouseId}.`, 'ok');
 
     const today = new Date().toISOString().slice(0, 10);
@@ -659,10 +667,11 @@ export class AgentsService {
     }
 
     const chase = overdue
-      .map(
-        (po) =>
-          `• ${po.supplier}: PO ${po.poNumber} (${po.qty} × ${po.materialId}) was due ${po.expectedDelivery} — please confirm a revised delivery date.`,
-      )
+      .map((po) => {
+        const s = supplierByName.get(String(po.supplier));
+        const contact = s?.contact ? ` (${s.contact}` + (s.onTimeRatePct !== undefined ? `, ${s.onTimeRatePct}% on-time` : '') + ')' : '';
+        return `• ${po.supplier}${contact}: PO ${po.poNumber} (${po.qty} × ${po.materialId}) was due ${po.expectedDelivery} — please confirm a revised delivery date.`;
+      })
       .join('\n');
     await this.notifyOwner(userId, `Overdue POs — WH ${warehouseId}`, `Draft supplier chase:\n${chase}`);
     await this.addStep(runId, 'act', `Chase draft for ${overdue.length} supplier message(s) delivered to notifications + webhook.`, 'ok');
@@ -686,7 +695,7 @@ export class AgentsService {
     horizonDays: number,
   ) {
     const base = await this.simulate(userId, warehouseId, threshold);
-    const trend = (await this.mcp.callTool('getDemandTrend', { warehouseId, days: 14 })) as {
+    const trend = (await this.mcp.callTool('getDemandTrend', { warehouseId, days: 14, byProduct: true })) as {
       structuredContent?: { records?: Array<Record<string, unknown>> };
     };
     const trendRecords = (trend.structuredContent?.records ?? []) as Array<Record<string, unknown>>;
@@ -694,7 +703,7 @@ export class AgentsService {
     const dailyByMaterial = new Map<string, number>();
     for (const r of trendRecords) {
       const mat = String(r.materialId ?? r.productId ?? '');
-      const qty = Number(r.outboundQty ?? r.qty ?? 0);
+      const qty = Number(r.totalQty ?? r.outboundQty ?? r.qty ?? 0);
       dailyByMaterial.set(mat, (dailyByMaterial.get(mat) ?? 0) + qty);
     }
     for (const [mat, total] of dailyByMaterial) {
@@ -793,14 +802,33 @@ export class AgentsService {
    * CRITIC (beta): an LLM reviews the plan against open orders and drafts.
    * Fails open — if the model is unavailable the plan proceeds with a note.
    */
+  /** BYOM per-purpose (beta, Phase Q): the goal owner's 'critic' model, if any. */
+  private async criticProvider(userId: string) {
+    const rows = await this.db.query<{ id: string; name: string; base_url: string; model_id: string; api_key_enc: string }>(
+      `SELECT id, name, base_url, model_id, api_key_enc FROM user_models
+       WHERE user_id = $1 AND active = true AND purpose = 'critic' ORDER BY created_at ASC`,
+      [userId],
+    );
+    const configs = [];
+    for (const r of rows.rows) {
+      try {
+        configs.push({ id: r.id, name: r.name, baseUrl: r.base_url, modelId: r.model_id, apiKey: openSecret(r.api_key_enc) });
+      } catch {
+        // rotated secret — skip
+      }
+    }
+    return this.llm.getProviderForUser(`critic:${userId}`, configs);
+  }
+
   private async criticReview(
+    userId: string,
     warehouseId: string,
     suggestions: Suggestion[],
     pos: Array<Record<string, unknown>>,
     prs: Array<Record<string, unknown>>,
   ): Promise<{ flagged: boolean; reason: string; detail: string }> {
     try {
-      const provider = this.llm.getProvider();
+      const provider = await this.criticProvider(userId);
       const prompt =
         `You are a supply-chain compliance reviewer. Review this reorder plan for warehouse ${warehouseId}.\n` +
         `PLAN: ${JSON.stringify(suggestions)}\n` +
@@ -983,6 +1011,32 @@ export class AgentsService {
     );
     if (overdue) {
       agents.push('po_followup');
+    }
+
+    // Rebalance: any product starved in one location with 2x surplus in another.
+    const stock = (await this.mcp.callTool('listWarehouseStock', { warehouseId })) as {
+      structuredContent?: { records?: Array<Record<string, unknown>> };
+    };
+    const byProduct = new Map<string, number[]>();
+    for (const r of stock.structuredContent?.records ?? []) {
+      const pid = String(r.productId || r.materialId);
+      byProduct.set(pid, [...(byProduct.get(pid) ?? []), Number(r.quantity || 0)]);
+    }
+    const imbalanced = [...byProduct.values()].some(
+      (qtys) => qtys.length > 1 && Math.min(...qtys) < 50 && Math.max(...qtys) > 100,
+    );
+    if (imbalanced) {
+      agents.push('rebalance');
+    }
+
+    // Cycle count: none completed in the last 7 days.
+    const counted = await this.db.query<{ n: string }>(
+      `SELECT COUNT(*)::int AS n FROM agent_runs
+       WHERE agent = 'cycle_count' AND warehouse_id = $1 AND started_at > NOW() - INTERVAL '7 days'`,
+      [warehouseId],
+    );
+    if (Number(counted.rows[0]?.n || 0) === 0) {
+      agents.push('cycle_count');
     }
 
     return agents;

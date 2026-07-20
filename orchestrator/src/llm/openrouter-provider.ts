@@ -15,6 +15,15 @@ import { streamOpenAICompletion } from './openai-stream';
  */
 const modelOutcomes = new Map<string, { total: number; ok: number }>();
 
+/** Rebuilds the in-process ledger from persisted counters (called at boot). */
+export function hydrateModelOutcomes(entries: Array<{ model: string; total: number; ok: number }>) {
+  for (const e of entries) {
+    if (e.total > 0 && !modelOutcomes.has(e.model)) {
+      modelOutcomes.set(e.model, { total: e.total, ok: e.ok });
+    }
+  }
+}
+
 export function reportModelOutcome(model: string, ok: boolean) {
   const entry = modelOutcomes.get(model) ?? { total: 0, ok: 0 };
   entry.total += 1;

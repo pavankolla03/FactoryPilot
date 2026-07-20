@@ -12,7 +12,7 @@ import { RealtimeGateway } from '../realtime/realtime.gateway';
 import { RedisService } from '../common/redis.service';
 import { AlertsService } from '../alerts/alerts.service';
 import { AgentsService } from '../agents/agents.service';
-import { reportModelOutcome } from '../llm/openrouter-provider';
+import { hydrateModelOutcomes, reportModelOutcome } from '../llm/openrouter-provider';
 import { openSecret } from '../common/secret-box';
 import type { UserModelConfig } from '../llm/custom-provider';
 import type { NormalizedToolCall } from '../llm/types';
@@ -1405,6 +1405,20 @@ export class ChatService {
     this.realtime.emitSessionLog(row.rows[0]);
   }
 
+  /** Outcome-routing ledger survives restarts: rebuild it from Redis at boot. */
+  async onModuleInit() {
+    try {
+      const entries: Array<{ model: string; total: number; ok: number }> = [];
+      for await (const key of this.redis.raw.scanIterator({ MATCH: 'model:quality:*', COUNT: 100 })) {
+        const h = await this.redis.raw.hGetAll(key);
+        entries.push({ model: key.replace('model:quality:', ''), total: Number(h.total || 0), ok: Number(h.ok || 0) });
+      }
+      hydrateModelOutcomes(entries);
+    } catch {
+      // Redis not up yet — the ledger simply starts cold.
+    }
+  }
+
   private readonly userModelCache = new Map<string, { at: number; configs: UserModelConfig[] }>();
 
   /** Active BYOM configs with decrypted keys, cached 60s (beta, Phase M). */
@@ -1414,7 +1428,7 @@ export class ChatService {
       return cached.configs;
     }
     const rows = await this.db.query<{ id: string; name: string; base_url: string; model_id: string; api_key_enc: string }>(
-      'SELECT id, name, base_url, model_id, api_key_enc FROM user_models WHERE user_id = $1 AND active = true ORDER BY created_at ASC',
+      "SELECT id, name, base_url, model_id, api_key_enc FROM user_models WHERE user_id = $1 AND active = true AND purpose = 'chat' ORDER BY created_at ASC",
       [userId],
     );
     const configs: UserModelConfig[] = [];

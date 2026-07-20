@@ -361,19 +361,22 @@ export class AuthService {
 
   async listUserModels(userId: string) {
     const rows = await this.db.query(
-      `SELECT id, name, base_url, model_id, active, created_at, last_used_at
+      `SELECT id, name, base_url, model_id, purpose, active, created_at, last_used_at
        FROM user_models WHERE user_id = $1 ORDER BY created_at ASC`,
       [userId],
     );
     return rows.rows;
   }
 
-  async addUserModel(userId: string, m: { name: string; baseUrl: string; modelId: string; apiKey: string }) {
+  async addUserModel(
+    userId: string,
+    m: { name: string; baseUrl: string; modelId: string; apiKey: string; purpose?: string },
+  ) {
     const row = await this.db.query(
-      `INSERT INTO user_models(user_id, name, base_url, model_id, api_key_enc)
-       VALUES($1, $2, $3, $4, $5)
-       RETURNING id, name, base_url, model_id, active, created_at`,
-      [userId, m.name, m.baseUrl.replace(/\/$/, ''), m.modelId, sealSecret(m.apiKey)],
+      `INSERT INTO user_models(user_id, name, base_url, model_id, api_key_enc, purpose)
+       VALUES($1, $2, $3, $4, $5, $6)
+       RETURNING id, name, base_url, model_id, purpose, active, created_at`,
+      [userId, m.name, m.baseUrl.replace(/\/$/, ''), m.modelId, sealSecret(m.apiKey), m.purpose ?? 'chat'],
     );
     return row.rows[0];
   }

@@ -7,6 +7,9 @@
  */
 
 export interface ForecastResult {
+  /** Smoothing parameters chosen by the auto-tuner (lowest one-step MAPE). */
+  alpha: number;
+  beta: number;
   /** Smoothed demand per day at the end of the series. */
   dailyDemand: number;
   /** Per-day trend component (positive = demand growing). */
@@ -19,17 +22,10 @@ export interface ForecastResult {
   mapePct: number | null;
 }
 
-/** Holt's linear method with fixed smoothing factors (alpha 0.4, beta 0.2). */
-export function holtForecast(series: number[], horizonDays: number): ForecastResult {
-  if (series.length === 0) {
-    return { dailyDemand: 0, trendPerDay: 0, horizonDemand: 0, sigma: 0, mapePct: null };
-  }
-  const alpha = 0.4;
-  const beta = 0.2;
+function runHolt(series: number[], alpha: number, beta: number) {
   let level = series[0];
   let trend = series.length > 1 ? series[1] - series[0] : 0;
   const absPctErrors: number[] = [];
-
   for (let i = 1; i < series.length; i += 1) {
     const forecast = level + trend;
     if (series[i] > 0) {
@@ -39,6 +35,36 @@ export function holtForecast(series: number[], horizonDays: number): ForecastRes
     level = alpha * series[i] + (1 - alpha) * (level + trend);
     trend = beta * (level - prevLevel) + (1 - beta) * trend;
   }
+  const mape = absPctErrors.length ? absPctErrors.reduce((s, v) => s + v, 0) / absPctErrors.length : null;
+  return { level, trend, mape };
+}
+
+/** Small grid the auto-tuner searches; balanced between smooth and reactive. */
+const PARAM_GRID: Array<[number, number]> = [
+  [0.2, 0.1],
+  [0.4, 0.2],
+  [0.6, 0.2],
+  [0.8, 0.3],
+];
+
+/**
+ * Holt's linear method with AUTO-TUNED smoothing factors (beta, Phase Q):
+ * every series gets the (alpha, beta) pair with the lowest one-step MAPE,
+ * so calm materials smooth hard and volatile ones react fast.
+ */
+export function holtForecast(series: number[], horizonDays: number): ForecastResult {
+  if (series.length === 0) {
+    return { alpha: 0.4, beta: 0.2, dailyDemand: 0, trendPerDay: 0, horizonDemand: 0, sigma: 0, mapePct: null };
+  }
+
+  let best = { alpha: 0.4, beta: 0.2, ...runHolt(series, 0.4, 0.2) };
+  for (const [alpha, beta] of PARAM_GRID) {
+    const candidate = runHolt(series, alpha, beta);
+    if (candidate.mape !== null && (best.mape === null || candidate.mape < best.mape)) {
+      best = { alpha, beta, ...candidate };
+    }
+  }
+  const { level, trend, mape } = best;
 
   const dailyDemand = Math.max(level, 0);
   const mean = series.reduce((s, v) => s + v, 0) / series.length;
@@ -50,11 +76,13 @@ export function holtForecast(series: number[], horizonDays: number): ForecastRes
   }
 
   return {
+    alpha: best.alpha,
+    beta: best.beta,
     dailyDemand: round2(dailyDemand),
     trendPerDay: round2(trend),
     horizonDemand: Math.round(horizonDemand),
     sigma: round2(sigma),
-    mapePct: absPctErrors.length ? Math.round((absPctErrors.reduce((s, v) => s + v, 0) / absPctErrors.length) * 100) : null,
+    mapePct: mape === null ? null : Math.round(mape * 100),
   };
 }
 

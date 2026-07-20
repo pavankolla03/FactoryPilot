@@ -7,6 +7,7 @@ type UserModel = {
   name: string;
   base_url: string;
   model_id: string;
+  purpose: 'chat' | 'critic';
   active: boolean;
   created_at: string;
   last_used_at: string | null;
@@ -23,6 +24,7 @@ export function MyModelsCard({ client }: { client: AxiosInstance }) {
   const [baseUrl, setBaseUrl] = useState('');
   const [modelId, setModelId] = useState('');
   const [apiKey, setApiKey] = useState('');
+  const [purpose, setPurpose] = useState<'chat' | 'critic'>('chat');
   const [error, setError] = useState('');
 
   const load = useCallback(async () => {
@@ -49,6 +51,7 @@ export function MyModelsCard({ client }: { client: AxiosInstance }) {
         baseUrl: baseUrl.trim(),
         modelId: modelId.trim(),
         apiKey: apiKey.trim(),
+        purpose,
       });
       setName('');
       setBaseUrl('');
@@ -80,6 +83,13 @@ export function MyModelsCard({ client }: { client: AxiosInstance }) {
         <input className="input py-2 text-xs" placeholder="Model id (e.g. gpt-4o-mini)" value={modelId} onChange={(e) => setModelId(e.target.value)} />
         <input className="input py-2 text-xs" type="password" placeholder="API key (stored encrypted)" value={apiKey} onChange={(e) => setApiKey(e.target.value)} />
       </div>
+      <div className="mb-3 flex items-center gap-2 text-xs text-fp-ink-2">
+        Use for
+        <select className="input !w-56 py-2 text-xs" value={purpose} onChange={(e) => setPurpose(e.target.value as 'chat' | 'critic')}>
+          <option value="chat">Chat & agents (Otto answers)</option>
+          <option value="critic">Critic (plan reviews)</option>
+        </select>
+      </div>
       <button className="btn-primary px-3 py-2 text-xs" onClick={() => void add()}>
         <Icon path={paths.plus} size={12} strokeWidth={2.4} />
         Add model
@@ -94,6 +104,7 @@ export function MyModelsCard({ client }: { client: AxiosInstance }) {
                 <div className="flex items-center gap-2 text-[13px] font-medium text-fp-ink">
                   <span className="truncate">{m.name}</span>
                   <span className="chip bg-fp-bg text-fp-ink-2">{m.model_id}</span>
+                  {m.purpose === 'critic' && <span className="chip bg-fp-warn-soft text-fp-warn">critic</span>}
                   {m.active && <span className="chip bg-fp-good-soft text-fp-good">routing</span>}
                 </div>
                 <div className="truncate text-[11px] text-fp-ink-3">

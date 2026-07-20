@@ -18,6 +18,8 @@ services:
         value: local
       - key: AUTH_JWT_SECRET
         generateValue: true
+      - key: MODEL_KEY_SECRET
+        generateValue: true # seals BYOM api keys (AES-256-GCM)
       - key: LLM_PROVIDER
         value: openrouter
       - key: OPENROUTER_API_KEY
