@@ -186,6 +186,28 @@ mcpServer.registerTool(
   );
 
   mcpServer.registerTool(
+    'transferStock',
+    {
+      title: 'Transfer stock between warehouses',
+      description:
+        'Moves quantity of a product from one warehouse to another (books into the destination receiving area). A write operation that requires approval. Use when one warehouse is starved and another holds surplus of the same product.',
+      inputSchema: {
+        productId: z.string(),
+        fromWarehouseId: z.string(),
+        toWarehouseId: z.string(),
+        qty: z.coerce.number().int().positive(),
+      },
+    },
+    async ({ productId, fromWarehouseId, toWarehouseId, qty }) => {
+      const result = await iflowPost('/iflow/transfer', { productId, fromWarehouseId, toWarehouseId, qty });
+      return {
+        content: [{ type: 'text', text: JSON.stringify(result) }],
+        structuredContent: result,
+      };
+    },
+  );
+
+  mcpServer.registerTool(
     'getDemandTrend',
     {
       title: 'Get movement/demand trend for a warehouse',

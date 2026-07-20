@@ -1,23 +1,156 @@
 [
-  { "materialId": "MAT-10023456", "productId": "P123", "warehouseId": "1010", "location": "packing", "quantity": 120 },
-  { "materialId": "MAT-10023456", "productId": "P123", "warehouseId": "1010", "location": "shipping", "quantity": 35 },
-  { "materialId": "MAT-10023457", "productId": "P124", "warehouseId": "1010", "location": "bulk", "quantity": 85 },
-  { "materialId": "MAT-10023458", "productId": "P125", "warehouseId": "1010", "location": "receiving", "quantity": 260 },
-  { "materialId": "MAT-10023459", "productId": "P126", "warehouseId": "1010", "location": "inspection", "quantity": 40 },
-  { "materialId": "MAT-10023460", "productId": "P127", "warehouseId": "1020", "location": "bulk", "quantity": 300 },
-  { "materialId": "MAT-10023461", "productId": "P128", "warehouseId": "1020", "location": "packing", "quantity": 50 },
-  { "materialId": "MAT-10023462", "productId": "P129", "warehouseId": "1020", "location": "shipping", "quantity": 25 },
-  { "materialId": "MAT-10023463", "productId": "P130", "warehouseId": "1020", "location": "receiving", "quantity": 92 },
-  { "materialId": "MAT-10023464", "productId": "P131", "warehouseId": "1030", "location": "bulk", "quantity": 77 },
-  { "materialId": "MAT-10023465", "productId": "P132", "warehouseId": "1030", "location": "packing", "quantity": 14 },
-  { "materialId": "MAT-10023466", "productId": "P133", "warehouseId": "1030", "location": "shipping", "quantity": 18 },
-  { "materialId": "MAT-10023467", "productId": "P134", "warehouseId": "1030", "location": "bulk", "quantity": 210 },
-  { "materialId": "MAT-10023468", "productId": "P135", "warehouseId": "1040", "location": "receiving", "quantity": 39 },
-  { "materialId": "MAT-10023469", "productId": "P136", "warehouseId": "1040", "location": "inspection", "quantity": 61 },
-  { "materialId": "MAT-10023470", "productId": "P137", "warehouseId": "1040", "location": "bulk", "quantity": 144 },
-  { "materialId": "MAT-10023471", "productId": "P138", "warehouseId": "1050", "location": "packing", "quantity": 300 },
-  { "materialId": "MAT-10023472", "productId": "P139", "warehouseId": "1050", "location": "shipping", "quantity": 65 },
-  { "materialId": "MAT-10023473", "productId": "P140", "warehouseId": "1050", "location": "bulk", "quantity": 410 },
-  { "materialId": "MAT-10023474", "productId": "P141", "warehouseId": "1050", "location": "inspection", "quantity": 9 },
-  { "materialId": "MAT-10023475", "productId": "P142", "warehouseId": "1050", "location": "packing", "quantity": 550 }
+  {
+    "materialId": "MAT-10023456",
+    "productId": "P123",
+    "warehouseId": "1010",
+    "location": "packing",
+    "quantity": 120
+  },
+  {
+    "materialId": "MAT-10023456",
+    "productId": "P123",
+    "warehouseId": "1010",
+    "location": "shipping",
+    "quantity": 35
+  },
+  {
+    "materialId": "MAT-10023457",
+    "productId": "P124",
+    "warehouseId": "1010",
+    "location": "bulk",
+    "quantity": 85
+  },
+  {
+    "materialId": "MAT-10023458",
+    "productId": "P125",
+    "warehouseId": "1010",
+    "location": "receiving",
+    "quantity": 260
+  },
+  {
+    "materialId": "MAT-10023459",
+    "productId": "P126",
+    "warehouseId": "1010",
+    "location": "inspection",
+    "quantity": 40
+  },
+  {
+    "materialId": "MAT-10023460",
+    "productId": "P127",
+    "warehouseId": "1020",
+    "location": "bulk",
+    "quantity": 300
+  },
+  {
+    "materialId": "MAT-10023461",
+    "productId": "P128",
+    "warehouseId": "1020",
+    "location": "packing",
+    "quantity": 50
+  },
+  {
+    "materialId": "MAT-10023462",
+    "productId": "P129",
+    "warehouseId": "1020",
+    "location": "shipping",
+    "quantity": 25
+  },
+  {
+    "materialId": "MAT-10023463",
+    "productId": "P130",
+    "warehouseId": "1020",
+    "location": "receiving",
+    "quantity": 92
+  },
+  {
+    "materialId": "MAT-10023464",
+    "productId": "P131",
+    "warehouseId": "1030",
+    "location": "bulk",
+    "quantity": 77
+  },
+  {
+    "materialId": "MAT-10023465",
+    "productId": "P132",
+    "warehouseId": "1030",
+    "location": "packing",
+    "quantity": 14
+  },
+  {
+    "materialId": "MAT-10023466",
+    "productId": "P133",
+    "warehouseId": "1030",
+    "location": "shipping",
+    "quantity": 18
+  },
+  {
+    "materialId": "MAT-10023467",
+    "productId": "P134",
+    "warehouseId": "1030",
+    "location": "bulk",
+    "quantity": 210
+  },
+  {
+    "materialId": "MAT-10023468",
+    "productId": "P135",
+    "warehouseId": "1040",
+    "location": "receiving",
+    "quantity": 39
+  },
+  {
+    "materialId": "MAT-10023469",
+    "productId": "P136",
+    "warehouseId": "1040",
+    "location": "inspection",
+    "quantity": 61
+  },
+  {
+    "materialId": "MAT-10023470",
+    "productId": "P137",
+    "warehouseId": "1040",
+    "location": "bulk",
+    "quantity": 144
+  },
+  {
+    "materialId": "MAT-10023471",
+    "productId": "P138",
+    "warehouseId": "1050",
+    "location": "packing",
+    "quantity": 300
+  },
+  {
+    "materialId": "MAT-10023472",
+    "productId": "P139",
+    "warehouseId": "1050",
+    "location": "shipping",
+    "quantity": 65
+  },
+  {
+    "materialId": "MAT-10023473",
+    "productId": "P140",
+    "warehouseId": "1050",
+    "location": "bulk",
+    "quantity": 410
+  },
+  {
+    "materialId": "MAT-10023474",
+    "productId": "P141",
+    "warehouseId": "1050",
+    "location": "inspection",
+    "quantity": 9
+  },
+  {
+    "materialId": "MAT-10023475",
+    "productId": "P142",
+    "warehouseId": "1050",
+    "location": "packing",
+    "quantity": 550
+  },
+  {
+    "materialId": "MAT-10023462",
+    "productId": "P129",
+    "warehouseId": "1050",
+    "location": "bulk",
+    "quantity": 400
+  }
 ]

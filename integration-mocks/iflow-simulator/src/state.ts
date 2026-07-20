@@ -173,6 +173,76 @@ export class IflowState {
     return { previousQty, newQty: args.targetQty, delta, movement: delta !== 0 ? movement : null };
   }
 
+  /**
+   * Inter-warehouse stock transfer (beta, Phase R): deducts from the source
+   * warehouse's largest holdings of the product (spilling across locations)
+   * and books the quantity into the destination's receiving area. Emits a
+   * movement record on both sides so demand trends and audits see it.
+   */
+  transferStock(args: { productId: string; fromWarehouseId: string; toWarehouseId: string; qty: number }): {
+    outbound: MovementRecord;
+    inbound: MovementRecord;
+  } {
+    const { productId, fromWarehouseId, toWarehouseId, qty } = args;
+    const sources = this.stocks
+      .filter((s) => s.productId === productId && s.warehouseId === fromWarehouseId && s.quantity > 0)
+      .sort((a, b) => b.quantity - a.quantity);
+    const available = sources.reduce((sum, s) => sum + s.quantity, 0);
+    if (available < qty) {
+      throw new Error(`INSUFFICIENT_STOCK: only ${available} × ${productId} available in WH ${fromWarehouseId}`);
+    }
+
+    let remaining = qty;
+    const fromLocation = sources[0].location;
+    for (const s of sources) {
+      const take = Math.min(s.quantity, remaining);
+      s.quantity -= take;
+      remaining -= take;
+      if (remaining === 0) {
+        break;
+      }
+    }
+
+    let destination = this.stocks.find(
+      (s) => s.productId === productId && s.warehouseId === toWarehouseId && s.location.toLowerCase() === 'receiving',
+    );
+    if (!destination) {
+      destination = {
+        materialId: sources[0].materialId,
+        productId,
+        warehouseId: toWarehouseId,
+        location: 'receiving',
+        quantity: 0,
+      };
+      this.stocks.push(destination);
+    }
+    destination.quantity += qty;
+
+    const now = new Date().toISOString();
+    const outbound: MovementRecord = {
+      movementId: `MOV-${Math.floor(100000 + Math.random() * 900000)}`,
+      productId,
+      warehouseId: fromWarehouseId,
+      fromLocation,
+      toLocation: `transfer:${toWarehouseId}`,
+      qty,
+      timestamp: now,
+      status: 'confirmed',
+    };
+    const inbound: MovementRecord = {
+      movementId: `MOV-${Math.floor(100000 + Math.random() * 900000)}`,
+      productId,
+      warehouseId: toWarehouseId,
+      fromLocation: `transfer:${fromWarehouseId}`,
+      toLocation: 'receiving',
+      qty,
+      timestamp: now,
+      status: 'confirmed',
+    };
+    this.movements.push(outbound, inbound);
+    return { outbound, inbound };
+  }
+
   getDemandTrend(warehouseId: string, days: number, byProduct = false) {
     const minTime = Date.now() - days * 24 * 60 * 60 * 1000;
     const byKey = new Map<string, { day: string; productId?: string; materialId?: string; moves: number; totalQty: number }>();

@@ -1,8 +1,8 @@
 {
   ".claude/settings.local.json": {
-    "mtime": 1784536028.228557,
-    "ast_hash": "8b6819531f8d391aa75c16b2c4322c7d",
-    "semantic_hash": "8b6819531f8d391aa75c16b2c4322c7d"
+    "mtime": 1784555484.000891,
+    "ast_hash": "f91102d4ae4baa148f303af8c7ac6e91",
+    "semantic_hash": "f91102d4ae4baa148f303af8c7ac6e91"
   },
   ".eslintrc.cjs": {
     "mtime": 1782986987.989049,
@@ -85,9 +85,9 @@
     "semantic_hash": "457668728d86d89d64089707dce2f215"
   },
   "frontend/src/components/AutonomyPage.tsx": {
-    "mtime": 1784495281.0729723,
-    "ast_hash": "e75374d38ea8eabb6c9fdfcdcb45accf",
-    "semantic_hash": "e75374d38ea8eabb6c9fdfcdcb45accf"
+    "mtime": 1784551941.1923401,
+    "ast_hash": "2fdb567f9e2f3faf5821aca48d3f36b9",
+    "semantic_hash": "2fdb567f9e2f3faf5821aca48d3f36b9"
   },
   "frontend/src/components/BoardPage.tsx": {
     "mtime": 1784321919.1276085,
@@ -180,9 +180,9 @@
     "semantic_hash": "feb122a86c6830530c28df3a14ebeb45"
   },
   "integration-mocks/iflow-simulator/fixtures/stocks.json": {
-    "mtime": 1782986687.3850787,
-    "ast_hash": "dd6a508749615ba1dc7ffda28032b238",
-    "semantic_hash": "dd6a508749615ba1dc7ffda28032b238"
+    "mtime": 1784552366.0486145,
+    "ast_hash": "54edef022fcf6f8a10cd61724084da44",
+    "semantic_hash": "54edef022fcf6f8a10cd61724084da44"
   },
   "integration-mocks/iflow-simulator/package.json": {
     "mtime": 1782986687.3627336,
@@ -190,9 +190,9 @@
     "semantic_hash": "b3517213dbad27c086933eac6ab0730d"
   },
   "integration-mocks/iflow-simulator/src/app.ts": {
-    "mtime": 1784495085.2962012,
-    "ast_hash": "c80d1ec10870c5108440a20fd5d9e7fa",
-    "semantic_hash": "c80d1ec10870c5108440a20fd5d9e7fa"
+    "mtime": 1784552401.3433304,
+    "ast_hash": "b34057044f6305d361c98c9b800e4632",
+    "semantic_hash": "b34057044f6305d361c98c9b800e4632"
   },
   "integration-mocks/iflow-simulator/src/index.ts": {
     "mtime": 1782986687.3948526,
@@ -215,9 +215,9 @@
     "semantic_hash": "fd92db9884be0c2debaf1200bda11476"
   },
   "integration-mocks/iflow-simulator/src/state.ts": {
-    "mtime": 1784495091.65418,
-    "ast_hash": "8261f98507a73d2ef7441311f54b135d",
-    "semantic_hash": "8261f98507a73d2ef7441311f54b135d"
+    "mtime": 1784552384.5930178,
+    "ast_hash": "ee57ebf9b9d7bcb420e283aa1db8c6f6",
+    "semantic_hash": "ee57ebf9b9d7bcb420e283aa1db8c6f6"
   },
   "integration-mocks/iflow-simulator/src/types.ts": {
     "mtime": 1784281506.421681,
@@ -260,9 +260,9 @@
     "semantic_hash": "356a089e9168ad68bc30e1178ce616ac"
   },
   "mcp-servers/mcp-warehouse-ops/src/index.ts": {
-    "mtime": 1784495102.5641584,
-    "ast_hash": "ce8efcf1b81ea5fa472bb2b1f7eb4db1",
-    "semantic_hash": "ce8efcf1b81ea5fa472bb2b1f7eb4db1"
+    "mtime": 1784552422.1894672,
+    "ast_hash": "46b6dc108f410381a64570a13a0a5972",
+    "semantic_hash": "46b6dc108f410381a64570a13a0a5972"
   },
   "mcp-servers/mcp-warehouse-ops/src/movements-cache.test.ts": {
     "mtime": 1782987421.4176948,
@@ -290,14 +290,14 @@
     "semantic_hash": "e05b15b0a49c11143403b97536f8a547"
   },
   "orchestrator/src/agents/agents.controller.ts": {
-    "mtime": 1784531592.7011352,
-    "ast_hash": "3fb0ae23146c3a00ba5a41bf3c9a8b0d",
-    "semantic_hash": "3fb0ae23146c3a00ba5a41bf3c9a8b0d"
+    "mtime": 1784552452.340715,
+    "ast_hash": "ebfba0e2dc74274645aa6090ca54effa",
+    "semantic_hash": "ebfba0e2dc74274645aa6090ca54effa"
   },
   "orchestrator/src/agents/agents.service.ts": {
-    "mtime": 1784536068.1052723,
-    "ast_hash": "5964ca9f651b45784d327c5899284aed",
-    "semantic_hash": "5964ca9f651b45784d327c5899284aed"
+    "mtime": 1784552562.3041244,
+    "ast_hash": "bcb422c26a8e36b2602449aa6c940cc9",
+    "semantic_hash": "bcb422c26a8e36b2602449aa6c940cc9"
   },
   "orchestrator/src/alerts/alerts.controller.ts": {
     "mtime": 1784321839.2943358,
@@ -355,9 +355,9 @@
     "semantic_hash": "e3fa6cda2492cf47bc71bee389ef526f"
   },
   "orchestrator/src/chat/chat.service.ts": {
-    "mtime": 1784535699.0360665,
-    "ast_hash": "0646b589c7edc751e2f452e47b27d294",
-    "semantic_hash": "0646b589c7edc751e2f452e47b27d294"
+    "mtime": 1784556014.723598,
+    "ast_hash": "c6cf88e1627b7dfff50a1c0bac0a39d4",
+    "semantic_hash": "c6cf88e1627b7dfff50a1c0bac0a39d4"
   },
   "orchestrator/src/chat/confirm-action-idempotency.test.ts": {
     "mtime": 1782986987.9890223,

@@ -17,10 +17,10 @@ import { openSecret } from '../common/secret-box';
 import type { UserModelConfig } from '../llm/custom-provider';
 import type { NormalizedToolCall } from '../llm/types';
 
-const WRITE_TOOLS = new Set(['moveStock', 'draftPurchaseRequisition', 'receivePurchaseOrder', 'adjustStock']);
+const WRITE_TOOLS = new Set(['moveStock', 'draftPurchaseRequisition', 'receivePurchaseOrder', 'adjustStock', 'transferStock']);
 
 /** Tools that mutate warehouse stock — their caches must be invalidated. */
-const STOCK_MUTATING_TOOLS = new Set(['moveStock', 'receivePurchaseOrder', 'adjustStock']);
+const STOCK_MUTATING_TOOLS = new Set(['moveStock', 'receivePurchaseOrder', 'adjustStock', 'transferStock']);
 
 // Tools served by the orchestrator itself (user-scoped state), not by an MCP server.
 const LOCAL_TOOLS = [
@@ -103,7 +103,7 @@ const LOCAL_TOOLS = [
       type: 'object',
       properties: {
         warehouseId: { type: 'string' },
-        agent: { type: 'string', enum: ['replenishment', 'cycle_count', 'rebalance', 'po_followup', 'forecast'] },
+        agent: { type: 'string', enum: ['replenishment', 'cycle_count', 'rebalance', 'po_followup', 'forecast', 'network_rebalance'] },
         threshold: { type: 'number' },
         autonomy: { type: 'string', enum: ['observe', 'propose', 'act'] },
         dailyBudgetQty: { type: 'number' },
@@ -319,7 +319,11 @@ export class ChatService {
 
             const toolDesc = this.getToolDescriptor(call.name);
             const warehouseId = (call.arguments.warehouseId as string | undefined) || undefined;
-            if (this.requiresWarehouseScope(toolDesc?.inputSchema)) {
+            if (call.name === 'transferStock') {
+              // Inter-warehouse transfer touches two warehouses — write scope on both.
+              this.assertScope(user, String(call.arguments.fromWarehouseId || ''), 'write');
+              this.assertScope(user, String(call.arguments.toWarehouseId || ''), 'write');
+            } else if (this.requiresWarehouseScope(toolDesc?.inputSchema)) {
               this.assertScope(user, warehouseId, WRITE_TOOLS.has(call.name) ? 'write' : 'read');
             }
 
@@ -546,7 +550,13 @@ export class ChatService {
         : [{ tool: payload.action.tool, params: payload.action.params }];
 
     for (const step of steps) {
-      this.assertScope(user, step.params.warehouseId as string | undefined, 'write');
+      if (step.tool === 'transferStock') {
+        // Inter-warehouse transfer touches two warehouses — write scope on both.
+        this.assertScope(user, String(step.params.fromWarehouseId || ''), 'write');
+        this.assertScope(user, String(step.params.toWarehouseId || ''), 'write');
+      } else {
+        this.assertScope(user, step.params.warehouseId as string | undefined, 'write');
+      }
     }
 
     const results: Array<Record<string, unknown>> = [];
@@ -725,14 +735,29 @@ export class ChatService {
     const result = await this.mcp.callTool(tool, params);
 
     if (STOCK_MUTATING_TOOLS.has(tool)) {
-      const warehouse = String(params.warehouseId || 'global');
-      await this.invalidateWarehouseCache(warehouse);
-      const structured = (result?.structuredContent || result) as { movement?: unknown };
-      if (structured.movement) {
-        await this.redis.raw.zAdd(`cache:movements:${warehouse}`, {
-          score: Date.now(),
-          value: JSON.stringify(structured),
-        });
+      if (tool === 'transferStock') {
+        const from = String(params.fromWarehouseId || 'global');
+        const to = String(params.toWarehouseId || 'global');
+        await this.invalidateWarehouseCache(from);
+        await this.invalidateWarehouseCache(to);
+        const transfer = ((result?.structuredContent || result) as { transfer?: { outbound?: unknown; inbound?: unknown } })
+          .transfer;
+        if (transfer?.outbound) {
+          await this.redis.raw.zAdd(`cache:movements:${from}`, { score: Date.now(), value: JSON.stringify(transfer.outbound) });
+        }
+        if (transfer?.inbound) {
+          await this.redis.raw.zAdd(`cache:movements:${to}`, { score: Date.now(), value: JSON.stringify(transfer.inbound) });
+        }
+      } else {
+        const warehouse = String(params.warehouseId || 'global');
+        await this.invalidateWarehouseCache(warehouse);
+        const structured = (result?.structuredContent || result) as { movement?: unknown };
+        if (structured.movement) {
+          await this.redis.raw.zAdd(`cache:movements:${warehouse}`, {
+            score: Date.now(),
+            value: JSON.stringify(structured),
+          });
+        }
       }
     }
 

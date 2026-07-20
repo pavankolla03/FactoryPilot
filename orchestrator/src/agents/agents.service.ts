@@ -68,8 +68,8 @@ export class AgentsService {
       validationError("autonomy must be 'observe', 'propose', or 'act'");
     }
     const agent = args.agent || 'replenishment';
-    if (!['replenishment', 'cycle_count', 'rebalance', 'po_followup', 'forecast'].includes(agent)) {
-      validationError("agent must be 'replenishment', 'cycle_count', 'rebalance', 'po_followup', or 'forecast'");
+    if (!['replenishment', 'cycle_count', 'rebalance', 'po_followup', 'forecast', 'network_rebalance'].includes(agent)) {
+      validationError("agent must be one of: replenishment, cycle_count, rebalance, po_followup, forecast, network_rebalance");
     }
     const row = await this.db.query<AgentGoal>(
       `INSERT INTO agent_goals(user_id, agent, warehouse_id, threshold, autonomy, daily_budget_qty)
@@ -141,6 +141,8 @@ export class AgentsService {
           ? `Chase overdue purchase orders for warehouse ${options.warehouseId} (trigger: ${options.trigger})`
         : agent === 'forecast'
           ? `Weekly demand forecast + reorder points for warehouse ${options.warehouseId} (trigger: ${options.trigger})`
+        : agent === 'network_rebalance'
+          ? `Network rebalance into warehouse ${options.warehouseId}: pull surplus from sister warehouses (autonomy: ${autonomy}, trigger: ${options.trigger})`
         : agent === 'rebalance'
           ? `Rebalance warehouse ${options.warehouseId}: feed starved downstream locations from surplus (autonomy: ${autonomy}, trigger: ${options.trigger})`
           : `Keep warehouse ${options.warehouseId} stocked above ${threshold} (autonomy: ${autonomy}, trigger: ${options.trigger})`;
@@ -161,6 +163,13 @@ export class AgentsService {
           ? this.executePoFollowup(runId, options.userId, options.warehouseId)
         : agent === 'forecast'
           ? this.executeForecast(runId, options.userId, options.warehouseId)
+        : agent === 'network_rebalance'
+          ? this.executeNetworkRebalance(runId, options.userId, options.displayName, {
+              warehouseId: options.warehouseId,
+              threshold,
+              autonomy,
+              budget,
+            })
         : agent === 'rebalance'
           ? this.executeRebalance(runId, options.userId, options.displayName, {
               warehouseId: options.warehouseId,
@@ -385,6 +394,155 @@ export class AgentsService {
         `WH ${cfg.warehouseId}: ${action.humanSummary}\nOne-click approve (beta): ${link}`,
         blocks,
       );
+    }
+  }
+
+  /**
+   * NETWORK REBALANCER (beta, Phase R): pulls surplus stock of the SAME
+   * product from sister warehouses into the goal warehouse when it is
+   * starved. Transfers are writes and run through the standard approval /
+   * budget / change-window machinery.
+   */
+  private async executeNetworkRebalance(
+    runId: string,
+    userId: string,
+    displayName: string,
+    cfg: { warehouseId: string; threshold: number; autonomy: string; budget: number },
+  ) {
+    const NETWORK = ['1010', '1020', '1030', '1040', '1050'];
+    const stockByWh = new Map<string, Array<Record<string, unknown>>>();
+    for (const wh of NETWORK) {
+      const stock = (await this.mcp.callTool('listWarehouseStock', { warehouseId: wh })) as {
+        structuredContent?: { records?: Array<Record<string, unknown>> };
+      };
+      stockByWh.set(wh, (stock.structuredContent?.records ?? []) as Array<Record<string, unknown>>);
+    }
+    const totalsFor = (wh: string) => {
+      const byProduct = new Map<string, number>();
+      for (const r of stockByWh.get(wh) ?? []) {
+        const pid = String(r.productId || r.materialId);
+        byProduct.set(pid, (byProduct.get(pid) ?? 0) + Number(r.quantity || 0));
+      }
+      return byProduct;
+    };
+
+    const local = totalsFor(cfg.warehouseId);
+    await this.addStep(
+      runId,
+      'observe',
+      `Observed ${local.size} product(s) locally and stock across ${NETWORK.length - 1} sister warehouse(s).`,
+      'ok',
+    );
+
+    const transfers: Array<{ productId: string; fromWarehouseId: string; qty: number; donorQty: number }> = [];
+    for (const [productId, qty] of local) {
+      if (qty >= cfg.threshold) {
+        continue;
+      }
+      let donor: { wh: string; surplus: number; total: number } | null = null;
+      for (const wh of NETWORK) {
+        if (wh === cfg.warehouseId) {
+          continue;
+        }
+        const donorQty = totalsFor(wh).get(productId) ?? 0;
+        const surplus = donorQty - cfg.threshold * 2;
+        if (surplus > 0 && (!donor || surplus > donor.surplus)) {
+          donor = { wh, surplus, total: donorQty };
+        }
+      }
+      if (donor) {
+        const deficit = cfg.threshold * 2 - qty;
+        const transferQty = Math.max(Math.min(deficit, donor.surplus), 0);
+        if (transferQty > 0) {
+          transfers.push({ productId, fromWarehouseId: donor.wh, qty: transferQty, donorQty: donor.total });
+        }
+      }
+    }
+
+    await this.addStep(
+      runId,
+      'plan',
+      `Network plan: ${transfers.length} transfer(s) — ` +
+        (transfers.map((t) => `${t.qty} × ${t.productId} from WH ${t.fromWarehouseId} (holds ${t.donorQty})`).join('; ') ||
+          'no sister warehouse holds usable surplus'),
+      'ok',
+    );
+
+    if (transfers.length === 0) {
+      await this.finishRun(runId, 'completed', 'No starved product has surplus elsewhere in the network.');
+      return;
+    }
+
+    const totalQty = transfers.reduce((sum, t) => sum + t.qty, 0);
+    if (cfg.autonomy === 'observe') {
+      await this.finishRun(runId, 'completed', `Observed: would transfer ${totalQty} unit(s) across ${transfers.length} lane(s).`);
+      return;
+    }
+
+    const withinWindow = await this.withinChangeWindow(cfg.warehouseId);
+    if (cfg.autonomy === 'act' && totalQty <= cfg.budget && withinWindow) {
+      for (const t of transfers) {
+        await this.mcp.callTool('transferStock', {
+          productId: t.productId,
+          fromWarehouseId: t.fromWarehouseId,
+          toWarehouseId: cfg.warehouseId,
+          qty: t.qty,
+        });
+        await this.invalidateWarehouse(t.fromWarehouseId);
+        await this.invalidateWarehouse(cfg.warehouseId);
+        await this.addStep(runId, 'act', `Transferred ${t.qty} × ${t.productId} WH ${t.fromWarehouseId} → WH ${cfg.warehouseId}`, 'ok');
+      }
+      await this.finishRun(runId, 'completed', `Auto-transferred ${totalQty} unit(s) from sister warehouses.`);
+      await this.recordEpisode(
+        `${await this.orgScopePrefix(userId)}wh:${cfg.warehouseId}`,
+        `Network rebalance pulled ${totalQty} unit(s) from sister warehouses.`,
+      );
+      await this.notifyOwner(userId, 'Network rebalance completed', `WH ${cfg.warehouseId}: pulled ${totalQty} unit(s) from the network.`);
+      return;
+    }
+
+    const policy = await this.makerCheckerFor(userId, cfg.warehouseId);
+    const action: PendingAction = {
+      actionId: randomUUID(),
+      tool: 'batch',
+      params: {
+        steps: transfers.map((t) => ({
+          tool: 'transferStock',
+          params: { productId: t.productId, fromWarehouseId: t.fromWarehouseId, toWarehouseId: cfg.warehouseId, qty: t.qty },
+        })),
+      },
+      humanSummary: `Network rebalance into WH ${cfg.warehouseId}: ${transfers
+        .map((t) => `${t.qty} × ${t.productId} from WH ${t.fromWarehouseId}`)
+        .join(', ')}`,
+      requestedBy: `Network Rebalancer (for ${displayName})`,
+      requestedById: userId,
+      runId,
+      makerChecker: policy,
+      ...(!withinWindow ? { anomaly: { reason: 'Outside the warehouse change window' } } : {}),
+    };
+    await this.redis.raw.setEx(`pending:action:${action.actionId}`, 1200, JSON.stringify({ userId, action }));
+    this.realtime.emitPendingAction(userId, action);
+    await this.addStep(runId, 'approval', `Awaiting approval of ${transfers.length} network transfer(s).`, 'pending');
+    await this.setRunStatus(runId, 'waiting_approval');
+    {
+      const { link, blocks } = this.approvalBlocks(action.humanSummary, action.actionId, userId);
+      await this.notifyOwner(
+        userId,
+        'Network rebalance awaiting approval',
+        `${action.humanSummary}\nOne-click approve (beta): ${link}`,
+        blocks,
+      );
+    }
+  }
+
+  /** Invalidate every read-cache entry for a warehouse (used by act-mode transfers). */
+  private async invalidateWarehouse(warehouseId: string) {
+    const toDelete: string[] = [];
+    for await (const key of this.redis.raw.scanIterator({ MATCH: `cache:*:${warehouseId}:*`, COUNT: 200 })) {
+      toDelete.push(key);
+    }
+    if (toDelete.length > 0) {
+      await this.redis.raw.del(toDelete);
     }
   }
 
@@ -958,9 +1116,38 @@ export class AgentsService {
         continue;
       }
       const dispatched: string[] = [];
+      // One stock snapshot per patrol keeps the network checks cheap.
+      const stockByWh = new Map<string, Array<Record<string, unknown>>>();
+      for (const wh of ['1010', '1020', '1030', '1040', '1050']) {
+        try {
+          const stock = (await this.mcp.callTool('listWarehouseStock', { warehouseId: wh })) as {
+            structuredContent?: { records?: Array<Record<string, unknown>> };
+          };
+          stockByWh.set(wh, (stock.structuredContent?.records ?? []) as Array<Record<string, unknown>>);
+        } catch {
+          stockByWh.set(wh, []);
+        }
+      }
       for (const warehouseId of ['1010', '1020', '1030', '1040', '1050']) {
         try {
-          const actions = await this.autopilotAssess(owner.id, warehouseId);
+          // Adaptive cadence (beta, Phase R): quiet warehouses back off up to
+          // 24h; any dispatch resets the patrol interval to 30 minutes.
+          const nextKey = `autopilot:next:${org.id}:${warehouseId}`;
+          const nextAt = Number((await this.redis.raw.get(nextKey)) || 0);
+          if (nextAt > Date.now()) {
+            continue;
+          }
+          const actions = await this.autopilotAssess(owner.id, warehouseId, stockByWh);
+          const backoffKey = `autopilot:backoff:${org.id}:${warehouseId}`;
+          if (actions.length > 0) {
+            await this.redis.raw.setEx(nextKey, 86400, String(Date.now() + 30 * 60_000));
+            await this.redis.raw.setEx(backoffKey, 172800, '30');
+          } else {
+            const prev = Number((await this.redis.raw.get(backoffKey)) || 30);
+            const backoff = Math.min(prev * 2, 1440);
+            await this.redis.raw.setEx(nextKey, 172800, String(Date.now() + backoff * 60_000));
+            await this.redis.raw.setEx(backoffKey, 172800, String(backoff));
+          }
           for (const agent of actions) {
             if (await this.ranRecently(agent, warehouseId, 6)) {
               continue;
@@ -987,7 +1174,11 @@ export class AgentsService {
   }
 
   /** Decides which agents a warehouse needs right now. */
-  private async autopilotAssess(userId: string, warehouseId: string): Promise<string[]> {
+  private async autopilotAssess(
+    userId: string,
+    warehouseId: string,
+    stockByWh?: Map<string, Array<Record<string, unknown>>>,
+  ): Promise<string[]> {
     const agents: string[] = [];
 
     const forecastFresh = await this.redis.raw.get(`forecast:${warehouseId}`);
@@ -1014,11 +1205,17 @@ export class AgentsService {
     }
 
     // Rebalance: any product starved in one location with 2x surplus in another.
-    const stock = (await this.mcp.callTool('listWarehouseStock', { warehouseId })) as {
-      structuredContent?: { records?: Array<Record<string, unknown>> };
-    };
+    let records: Array<Record<string, unknown>>;
+    if (stockByWh?.has(warehouseId)) {
+      records = stockByWh.get(warehouseId)!;
+    } else {
+      const stock = (await this.mcp.callTool('listWarehouseStock', { warehouseId })) as {
+        structuredContent?: { records?: Array<Record<string, unknown>> };
+      };
+      records = (stock.structuredContent?.records ?? []) as Array<Record<string, unknown>>;
+    }
     const byProduct = new Map<string, number[]>();
-    for (const r of stock.structuredContent?.records ?? []) {
+    for (const r of records) {
       const pid = String(r.productId || r.materialId);
       byProduct.set(pid, [...(byProduct.get(pid) ?? []), Number(r.quantity || 0)]);
     }
@@ -1027,6 +1224,33 @@ export class AgentsService {
     );
     if (imbalanced) {
       agents.push('rebalance');
+    }
+
+    // Network rebalance (Phase R): a locally starved product with real surplus
+    // in a sister warehouse.
+    if (stockByWh) {
+      const localTotals = new Map<string, number>();
+      for (const r of records) {
+        const pid = String(r.productId || r.materialId);
+        localTotals.set(pid, (localTotals.get(pid) ?? 0) + Number(r.quantity || 0));
+      }
+      outer: for (const [pid, qty] of localTotals) {
+        if (qty >= 50) {
+          continue;
+        }
+        for (const [wh, rows] of stockByWh) {
+          if (wh === warehouseId) {
+            continue;
+          }
+          const donorQty = rows
+            .filter((r) => String(r.productId || r.materialId) === pid)
+            .reduce((sum, r) => sum + Number(r.quantity || 0), 0);
+          if (donorQty > 100) {
+            agents.push('network_rebalance');
+            break outer;
+          }
+        }
+      }
     }
 
     // Cycle count: none completed in the last 7 days.

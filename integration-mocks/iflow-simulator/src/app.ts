@@ -204,6 +204,31 @@ export function createApp(state = new IflowState(), ledger = new WriteLedger()) 
     return res.json({ records, dataSource: sapLiveEnabled() ? 'write-ledger' : 'simulator' });
   });
 
+  app.post('/iflow/transfer', (req, res) => {
+    const parsed = z
+      .object({
+        productId: z.string().min(1),
+        fromWarehouseId: z.string().min(1),
+        toWarehouseId: z.string().min(1),
+        qty: z.number().int().positive(),
+      })
+      .safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json(errorResponse('VALIDATION_ERROR', parsed.error.message));
+    }
+    if (parsed.data.fromWarehouseId === parsed.data.toWarehouseId) {
+      return res.status(400).json(errorResponse('VALIDATION_ERROR', 'source and destination warehouses must differ'));
+    }
+    try {
+      const result = state.transferStock(parsed.data);
+      return res.json({ success: true, transfer: result, dataSource: 'simulator' });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'transfer failed';
+      const status = message.startsWith('INSUFFICIENT_STOCK') ? 409 : 500;
+      return res.status(status).json(errorResponse(status === 409 ? 'INSUFFICIENT_STOCK' : 'VALIDATION_ERROR', message));
+    }
+  });
+
   app.get('/iflow/production-orders', (req, res) => {
     const warehouseId = req.query.warehouseId ? String(req.query.warehouseId) : undefined;
     const status = req.query.status ? String(req.query.status) : undefined;
