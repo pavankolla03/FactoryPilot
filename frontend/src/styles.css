@@ -195,3 +195,72 @@ body {
   background: #1b7f3b;
   animation: fp-pulse-dot 1.6s ease-in-out infinite;
 }
+
+/* --- Agent activity timeline (Claude-style working block) --- */
+
+.activity-card {
+  background: #f5f4ec;
+  border: 1px solid #e8e6da;
+}
+
+.activity-chip {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 9999px;
+  border: 1px solid #e3e1d5;
+  background: #ffffff;
+  padding: 1px 8px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: #8a877c;
+}
+
+@keyframes fp-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.fp-spinner {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border-radius: 9999px;
+  border: 2px solid #e3e1d5;
+  border-top-color: #2a78d6;
+  animation: fp-spin 0.7s linear infinite;
+}
+
+@keyframes fp-shimmer {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+.shimmer-text {
+  background: linear-gradient(90deg, #8a877c 35%, #c9c6b4 50%, #8a877c 65%);
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: fp-shimmer 1.8s linear infinite;
+}
+
+@keyframes fp-step-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.step-in {
+  animation: fp-step-in 0.25s ease-out both;
+}

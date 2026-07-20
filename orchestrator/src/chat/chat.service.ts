@@ -9,6 +9,7 @@ import type { LlmChatMessage } from '../llm/types';
 import { McpService } from '../mcp/mcp.service';
 import { QuotaService } from '../quota/quota.service';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
+import type { ChatToolEvent } from '../realtime/realtime.gateway';
 import { RedisService } from '../common/redis.service';
 import { AlertsService } from '../alerts/alerts.service';
 import { AgentsService } from '../agents/agents.service';
@@ -208,6 +209,8 @@ export class ChatService {
         messageId: msgId,
         source: 'cache',
         grounded: cached.grounded,
+        stats: { elapsedMs: Date.now() - start, rounds: 0, toolCount: 0, model: 'answer-cache', tokens: 0 },
+        toolEvents: [],
       });
       await this.writeSessionLog({
         userId: user.id,
@@ -263,6 +266,15 @@ export class ChatService {
     let totalTokens = 0;
     let lastModelUsed = '';
     let streamedChars = 0;
+    const toolEvents: ChatToolEvent[] = [];
+    let roundsUsed = 0;
+    const statsNow = () => ({
+      elapsedMs: Date.now() - start,
+      rounds: roundsUsed,
+      toolCount: invokedTools.length,
+      model: lastModelUsed || 'fallback',
+      tokens: totalTokens,
+    });
 
     const toolDefs = tools.map((t) => ({ name: t.name, description: t.description, inputSchema: t.inputSchema }));
     const onTextDelta = (delta: string) => {
@@ -272,6 +284,8 @@ export class ChatService {
 
     try {
       for (let round = 0; round < 8; round += 1) {
+        roundsUsed = round + 1;
+        this.realtime.emitChatStatus(user.id, { conversationId: convId, kind: 'thinking', round: round + 1 });
         let completion;
         try {
           completion = provider.completeStream
@@ -332,9 +346,49 @@ export class ChatService {
               continue;
             }
 
-            const { data, cacheHit } = this.isLocalTool(call.name)
-              ? { data: await this.executeLocalTool(user, call.name, call.arguments), cacheHit: false }
-              : await this.readToolWithCache(call.name, call.arguments);
+            const stepId = randomUUID();
+            const server = this.isLocalTool(call.name)
+              ? 'orchestrator'
+              : this.mcp.getTool(call.name)?.serverName || 'mcp';
+            this.realtime.emitChatStatus(user.id, {
+              conversationId: convId,
+              kind: 'tool_start',
+              id: stepId,
+              tool: call.name,
+              server,
+              args: call.arguments,
+            });
+            const toolStart = Date.now();
+            let data: unknown;
+            let cacheHit = false;
+            try {
+              ({ data, cacheHit } = this.isLocalTool(call.name)
+                ? { data: await this.executeLocalTool(user, call.name, call.arguments), cacheHit: false }
+                : await this.readToolWithCache(call.name, call.arguments));
+            } catch (error) {
+              const failed: ChatToolEvent = {
+                id: stepId,
+                tool: call.name,
+                server,
+                args: call.arguments,
+                ms: Date.now() - toolStart,
+                status: 'error',
+              };
+              toolEvents.push(failed);
+              this.realtime.emitChatStatus(user.id, { conversationId: convId, kind: 'tool_end', ...failed });
+              throw error;
+            }
+            const event: ChatToolEvent = {
+              id: stepId,
+              tool: call.name,
+              server,
+              args: call.arguments,
+              ms: Date.now() - toolStart,
+              cacheHit,
+              status: 'ok',
+            };
+            toolEvents.push(event);
+            this.realtime.emitChatStatus(user.id, { conversationId: convId, kind: 'tool_end', ...event });
             source = cacheHit ? 'cache' : source;
             const toolContent = JSON.stringify(data);
             llmMessages.push({
@@ -376,7 +430,29 @@ export class ChatService {
             if (allAutoApprovable) {
               // Policy allows executing these writes without human sign-off.
               for (const call of writeCalls) {
+                const stepId = randomUUID();
+                const server = this.mcp.getTool(call.name)?.serverName || 'mcp-warehouse-ops';
+                this.realtime.emitChatStatus(user.id, {
+                  conversationId: convId,
+                  kind: 'tool_start',
+                  id: stepId,
+                  tool: call.name,
+                  server,
+                  args: call.arguments,
+                });
+                const toolStart = Date.now();
                 const result = await this.executeWriteTool(call.name, call.arguments);
+                const event: ChatToolEvent = {
+                  id: stepId,
+                  tool: call.name,
+                  server,
+                  args: call.arguments,
+                  ms: Date.now() - toolStart,
+                  cacheHit: false,
+                  status: 'ok',
+                };
+                toolEvents.push(event);
+                this.realtime.emitChatStatus(user.id, { conversationId: convId, kind: 'tool_end', ...event });
                 const toolContent = JSON.stringify({ ...result, autoApproved: true, policyMaxQty: policy.autoMax });
                 llmMessages.push({ role: 'tool', name: call.name, toolCallId: call.id, content: toolContent });
                 await this.insertMessage(convId, 'tool', toolContent, { toolCallId: call.id, name: call.name });
@@ -423,10 +499,29 @@ export class ChatService {
               writeCalls.length === 1
                 ? 'I prepared a write action. Please confirm to execute.'
                 : `I prepared ${writeCalls.length} write actions as one workflow. Please confirm to execute.`;
+            // Surface the deferred writes in the activity timeline as awaiting approval.
+            for (const call of writeCalls) {
+              const event: ChatToolEvent = {
+                id: randomUUID(),
+                tool: call.name,
+                server: this.mcp.getTool(call.name)?.serverName || 'mcp-warehouse-ops',
+                args: call.arguments,
+                status: 'pending',
+              };
+              toolEvents.push(event);
+              this.realtime.emitChatStatus(user.id, { conversationId: convId, kind: 'tool_end', ...event });
+            }
+
             await this.insertMessage(convId, 'assistant', assistantText);
             const msgId = randomUUID();
             this.realtime.emitChatToken(user.id, { conversationId: convId, delta: assistantText });
-            this.realtime.emitChatDone(user.id, { conversationId: convId, messageId: msgId, source: 'live' });
+            this.realtime.emitChatDone(user.id, {
+              conversationId: convId,
+              messageId: msgId,
+              source: 'live',
+              stats: statsNow(),
+              toolEvents,
+            });
 
             await this.writeSessionLog({
               userId: user.id,
@@ -489,7 +584,14 @@ export class ChatService {
       // Non-streaming provider: emit the full text as a single chunk.
       this.realtime.emitChatToken(user.id, { conversationId: convId, delta: finalText });
     }
-    this.realtime.emitChatDone(user.id, { conversationId: convId, messageId, source, grounded });
+    this.realtime.emitChatDone(user.id, {
+      conversationId: convId,
+      messageId,
+      source,
+      grounded,
+      stats: statsNow(),
+      toolEvents,
+    });
 
     if (grounded && finalText) {
       const ttl = Number(process.env.ANSWER_DEDUPE_TTL_SECONDS || 600);

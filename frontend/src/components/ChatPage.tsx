@@ -4,11 +4,31 @@ import remarkGfm from 'remark-gfm';
 import { Icon, LogoMark, SourceChip, paths } from './ui';
 import { useI18n } from '../i18n';
 
+export type AgentStep = {
+  id: string;
+  tool: string;
+  server: string;
+  args?: Record<string, unknown>;
+  ms?: number;
+  cacheHit?: boolean;
+  status: 'running' | 'ok' | 'error' | 'pending';
+};
+
+export type TurnStats = {
+  elapsedMs: number;
+  rounds: number;
+  toolCount: number;
+  model: string;
+  tokens: number;
+};
+
 export type ChatTurn = {
   role: 'user' | 'assistant';
   text: string;
   source?: 'cache' | 'live';
   grounded?: boolean;
+  steps?: AgentStep[];
+  stats?: TurnStats;
 };
 
 export type ConversationSummary = {
@@ -41,6 +61,8 @@ export function ChatPage({
   chatTurns,
   streaming,
   streamingText,
+  agentSteps,
+  workingSince,
   chatInput,
   conversations,
   activeConversationId,
@@ -55,6 +77,8 @@ export function ChatPage({
   chatTurns: ChatTurn[];
   streaming: boolean;
   streamingText: string;
+  agentSteps: AgentStep[];
+  workingSince: number | null;
   chatInput: string;
   conversations: ConversationSummary[];
   activeConversationId: string | null;
@@ -70,7 +94,7 @@ export function ChatPage({
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
-  }, [chatTurns.length, streamingText]);
+  }, [chatTurns.length, streamingText, agentSteps.length]);
 
   return (
     <section className="grid items-start gap-5 xl:grid-cols-[240px_minmax(0,1fr)]">
@@ -142,6 +166,7 @@ export function ChatPage({
                   </div>
                   <div className="min-w-0 flex-1">
                     <div className="mb-1 text-[12px] font-semibold tracking-wide text-[#8A877C]">Otto</div>
+                    <TurnActivity steps={turn.steps} stats={turn.stats} />
                     <AssistantBody text={turn.text} />
                     {turn.source && (
                       <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
@@ -151,6 +176,13 @@ export function ChatPage({
                         )}
                         {turn.grounded === false && (
                           <span className="chip bg-fp-warn-soft text-fp-warn">No data source consulted</span>
+                        )}
+                        {turn.stats && turn.stats.elapsedMs > 0 && (
+                          <span className="text-[11px] tabular-nums text-[#A5A294]">
+                            {(turn.stats.elapsedMs / 1000).toFixed(1)}s
+                            {turn.stats.model ? ` · ${prettyModel(turn.stats.model)}` : ''}
+                            {turn.stats.tokens > 0 ? ` · ${turn.stats.tokens.toLocaleString()} tokens` : ''}
+                          </span>
                         )}
                         <span className="ml-1 flex items-center gap-0.5">
                           <button
@@ -182,10 +214,13 @@ export function ChatPage({
                 </div>
                 <div className="min-w-0 flex-1">
                   <div className="mb-1 text-[12px] font-semibold tracking-wide text-[#8A877C]">Otto</div>
-                  <div className="chat-serif whitespace-pre-wrap">
-                    {streamingText || <span className="italic text-[#8A877C]">{t('chat.working')}…</span>}
-                    {streamingText && <span className="stream-cursor" />}
-                  </div>
+                  <LiveActivity steps={agentSteps} since={workingSince} writing={Boolean(streamingText)} />
+                  {streamingText && (
+                    <div className="chat-serif whitespace-pre-wrap">
+                      {streamingText}
+                      <span className="stream-cursor" />
+                    </div>
+                  )}
                 </div>
               </div>
             )}
@@ -219,6 +254,146 @@ export function ChatPage({
       </div>
 
     </section>
+  );
+}
+
+const SERVER_LABEL: Record<string, string> = {
+  inventory: 'MCP Inventory',
+  'warehouse-ops': 'MCP Warehouse Ops',
+  'mcp-inventory': 'MCP Inventory',
+  'mcp-warehouse-ops': 'MCP Warehouse Ops',
+  orchestrator: 'Orchestrator',
+};
+
+/** "openrouter(vendor/model:free)" or "vendor/model" -> "model". */
+export function prettyModel(model: string) {
+  const inner = model.match(/\(([^)]+)\)/)?.[1] ?? model;
+  return inner.split('/').pop() || inner;
+}
+
+/** "getStockLevel" -> "Get stock level". */
+function prettyToolName(tool: string) {
+  const spaced = tool.replace(/([A-Z])/g, ' $1').toLowerCase().trim();
+  return spaced.charAt(0).toUpperCase() + spaced.slice(1);
+}
+
+function compactArgs(args?: Record<string, unknown>) {
+  if (!args || Object.keys(args).length === 0) {
+    return '';
+  }
+  return Object.entries(args)
+    .map(([k, v]) => `${k}: ${typeof v === 'object' ? JSON.stringify(v) : String(v)}`)
+    .join(' · ');
+}
+
+function StepStatusIcon({ status }: { status: AgentStep['status'] }) {
+  if (status === 'running') {
+    return <span className="fp-spinner shrink-0" />;
+  }
+  if (status === 'error') {
+    return <span className="grid h-4 w-4 shrink-0 place-items-center rounded-full bg-fp-bad-soft text-[10px] font-bold text-fp-bad">!</span>;
+  }
+  if (status === 'pending') {
+    return <span className="grid h-4 w-4 shrink-0 place-items-center rounded-full bg-fp-warn-soft text-[10px] font-bold text-fp-warn">⏸</span>;
+  }
+  return <span className="grid h-4 w-4 shrink-0 place-items-center rounded-full bg-fp-good-soft text-[10px] font-bold text-fp-good">✓</span>;
+}
+
+function StepRow({ step, showArgs }: { step: AgentStep; showArgs?: boolean }) {
+  const args = showArgs ? compactArgs(step.args) : '';
+  return (
+    <div className="step-in py-1">
+      <div className="flex items-center gap-2 text-[12.5px]">
+        <StepStatusIcon status={step.status} />
+        <span className="font-medium text-[#3D3C36]">{prettyToolName(step.tool)}</span>
+        <span className="activity-chip">{SERVER_LABEL[step.server] || step.server}</span>
+        {step.cacheHit && <span className="activity-chip text-fp-accent">cache</span>}
+        <span className="ml-auto shrink-0 text-[11px] tabular-nums text-[#A5A294]">
+          {step.status === 'running'
+            ? 'running…'
+            : step.status === 'pending'
+              ? 'awaiting approval'
+              : step.ms != null
+                ? `${(step.ms / 1000).toFixed(2)}s`
+                : ''}
+        </span>
+      </div>
+      {args && <div className="ml-6 mt-0.5 truncate text-[11px] text-[#A5A294]">{args}</div>}
+    </div>
+  );
+}
+
+/** Claude-style live "working" block: shimmer label, ticking timer, tool steps streaming in. */
+function LiveActivity({ steps, since, writing }: { steps: AgentStep[]; since: number | null; writing: boolean }) {
+  const [now, setNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    const id = window.setInterval(() => setNow(Date.now()), 100);
+    return () => window.clearInterval(id);
+  }, []);
+
+  const elapsed = since ? Math.max(0, now - since) / 1000 : 0;
+  const running = steps.find((s) => s.status === 'running');
+  const label = writing ? 'Writing the answer' : running ? `Running ${prettyToolName(running.tool)}` : 'Thinking';
+
+  return (
+    <div className="activity-card mb-2.5 rounded-2xl px-3.5 py-2.5">
+      <div className="flex items-center gap-2">
+        <span className="fp-spinner" />
+        <span className="shimmer-text text-[12.5px] font-medium">{label}…</span>
+        {since && <span className="ml-auto text-[11px] tabular-nums text-[#A5A294]">{elapsed.toFixed(1)}s</span>}
+      </div>
+      {steps.length > 0 && (
+        <div className="mt-1.5 border-t border-[#E8E6DA] pt-1">
+          {steps.map((s) => (
+            <StepRow key={s.id} step={s} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Collapsed one-line summary of a finished turn's agent work; expands to the full timeline. */
+function TurnActivity({ steps, stats }: { steps?: AgentStep[]; stats?: TurnStats }) {
+  const [open, setOpen] = useState(false);
+  const hasSteps = Boolean(steps && steps.length > 0);
+  if (!hasSteps && !stats) {
+    return null;
+  }
+  if (!hasSteps && stats && stats.toolCount === 0 && stats.model === 'answer-cache') {
+    return null; // instant dedupe-cache answers need no timeline
+  }
+  if (!hasSteps) {
+    return null;
+  }
+
+  const seconds = stats ? (stats.elapsedMs / 1000).toFixed(1) : null;
+  const summary = [
+    seconds ? `Worked for ${seconds}s` : 'Worked',
+    `${steps!.length} tool ${steps!.length === 1 ? 'call' : 'calls'}`,
+    stats && stats.rounds > 1 ? `${stats.rounds} rounds` : '',
+  ]
+    .filter(Boolean)
+    .join(' · ');
+
+  return (
+    <div className="mb-2">
+      <button
+        className="flex items-center gap-1.5 rounded-lg px-1.5 py-1 text-[12px] font-medium text-[#8A877C] transition hover:bg-[#EEEDE4] hover:text-[#56544D]"
+        onClick={() => setOpen(!open)}
+      >
+        <span className={`inline-block text-[10px] transition-transform ${open ? 'rotate-90' : ''}`}>▶</span>
+        {summary}
+      </button>
+      {open && (
+        <div className="activity-card step-in mt-1.5 rounded-2xl px-3.5 py-1.5">
+          {steps!.map((s) => (
+            <StepRow key={s.id} step={s} showArgs />
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 

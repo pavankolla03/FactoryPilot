@@ -12,7 +12,14 @@ import { AutopilotBar } from './components/AutopilotBar';
 import { BoardPage } from './components/BoardPage';
 import { AuthPage } from './components/AuthPages';
 import { Sidebar, type Tab } from './components/Sidebar';
-import { ChatPage, type ChatTurn, type ConversationSummary, type StockAlert } from './components/ChatPage';
+import {
+  ChatPage,
+  type AgentStep,
+  type ChatTurn,
+  type ConversationSummary,
+  type StockAlert,
+  type TurnStats,
+} from './components/ChatPage';
 import { AnalyticsPage } from './components/AnalyticsPage';
 import { ActivityPage } from './components/ActivityPage';
 import { UsersPage, type AdminUser, type WarehousePolicy } from './components/UsersPage';
@@ -63,6 +70,10 @@ function App() {
   const [streaming, setStreaming] = useState(false);
   const [streamingText, setStreamingText] = useState('');
   const streamingTextRef = useRef('');
+  const [agentSteps, setAgentSteps] = useState<AgentStep[]>([]);
+  const agentStepsRef = useRef<AgentStep[]>([]);
+  const [workingSince, setWorkingSince] = useState<number | null>(null);
+  const chatStartRef = useRef(0);
   const [pendingActions, setPendingActions] = useState<PendingAction[]>([]);
   const [usage, setUsage] = useState({ used: 0, limit: 50000, periodStart: '' });
   const [tab, setTab] = useState<Tab>('chat');
@@ -198,20 +209,55 @@ function App() {
       setStreamingText(streamingTextRef.current);
     });
 
-    socket.on('chat:done', (payload: { conversationId: string; source: 'cache' | 'live'; grounded?: boolean }) => {
-      const finalText = streamingTextRef.current;
-      if (finalText) {
-        setChatTurns((prev) => [
-          ...prev,
-          { role: 'assistant', text: finalText, source: payload.source, grounded: payload.grounded },
-        ]);
+    socket.on('chat:status', (payload: { kind: string } & AgentStep) => {
+      if (payload.kind === 'tool_start') {
+        const next = [...agentStepsRef.current, { ...payload, status: 'running' as const }];
+        agentStepsRef.current = next;
+        setAgentSteps(next);
+      } else if (payload.kind === 'tool_end') {
+        const existing = agentStepsRef.current.some((s) => s.id === payload.id);
+        const next = existing
+          ? agentStepsRef.current.map((s) => (s.id === payload.id ? { ...s, ...payload } : s))
+          : [...agentStepsRef.current, payload];
+        agentStepsRef.current = next;
+        setAgentSteps(next);
       }
-      setStreaming(false);
-      streamingTextRef.current = '';
-      setStreamingText('');
-      void loadConversations();
-      void loadAlerts();
     });
+
+    socket.on(
+      'chat:done',
+      (payload: {
+        conversationId: string;
+        source: 'cache' | 'live';
+        grounded?: boolean;
+        stats?: TurnStats;
+        toolEvents?: AgentStep[];
+      }) => {
+        const finalText = streamingTextRef.current;
+        const stats: TurnStats = payload.stats ?? {
+          elapsedMs: chatStartRef.current ? Date.now() - chatStartRef.current : 0,
+          rounds: 0,
+          toolCount: agentStepsRef.current.length,
+          model: '',
+          tokens: 0,
+        };
+        const steps = payload.toolEvents?.length ? payload.toolEvents : agentStepsRef.current;
+        if (finalText) {
+          setChatTurns((prev) => [
+            ...prev,
+            { role: 'assistant', text: finalText, source: payload.source, grounded: payload.grounded, stats, steps },
+          ]);
+        }
+        setStreaming(false);
+        streamingTextRef.current = '';
+        setStreamingText('');
+        agentStepsRef.current = [];
+        setAgentSteps([]);
+        setWorkingSince(null);
+        void loadConversations();
+        void loadAlerts();
+      },
+    );
 
     socket.on('chat:pending_action', (payload: PendingAction) => {
       setPendingActions((prev) => [payload, ...prev.filter((a) => a.actionId !== payload.actionId)]);
@@ -271,6 +317,10 @@ function App() {
     setChatTurns((prev) => [...prev, { role: 'user', text }]);
     setChatInput('');
     setStreaming(true);
+    chatStartRef.current = Date.now();
+    setWorkingSince(chatStartRef.current);
+    agentStepsRef.current = [];
+    setAgentSteps([]);
     try {
       const res = await client.post('/api/chat', {
         message: text,
@@ -283,6 +333,9 @@ function App() {
       setStreaming(false);
       streamingTextRef.current = '';
       setStreamingText('');
+      agentStepsRef.current = [];
+      setAgentSteps([]);
+      setWorkingSince(null);
       const detail = axios.isAxiosError(error)
         ? error.response?.data?.error?.message || error.message
         : 'request failed';
@@ -516,6 +569,8 @@ function App() {
             chatTurns={chatTurns}
             streaming={streaming}
             streamingText={streamingText}
+            agentSteps={agentSteps}
+            workingSince={workingSince}
             chatInput={chatInput}
             conversations={conversations}
             activeConversationId={activeConversationId}

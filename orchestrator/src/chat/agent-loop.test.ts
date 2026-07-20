@@ -121,6 +121,7 @@ function buildFakes() {
     emitTokenDelta: () => undefined,
     emitChatToken: () => undefined,
     emitChatDone: () => undefined,
+    emitChatStatus: () => undefined,
     emitPendingAction: () => undefined,
     emitSessionLog: () => undefined,
   } as unknown as RealtimeGateway;

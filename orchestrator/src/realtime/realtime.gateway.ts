@@ -8,6 +8,31 @@ import { Server, Socket } from 'socket.io';
 import { AuthService } from '../auth/auth.service';
 import { QuotaService } from '../quota/quota.service';
 
+/** One tool invocation inside an agent turn, as shown in the chat activity timeline. */
+export type ChatToolEvent = {
+  id: string;
+  tool: string;
+  server: string;
+  args?: Record<string, unknown>;
+  ms?: number;
+  cacheHit?: boolean;
+  status: 'ok' | 'error' | 'pending';
+};
+
+export type ChatTurnStats = {
+  elapsedMs: number;
+  rounds: number;
+  toolCount: number;
+  model: string;
+  tokens: number;
+};
+
+export type ChatStatusPayload = {
+  conversationId: string;
+  kind: 'thinking' | 'tool_start' | 'tool_end';
+  round?: number;
+} & Partial<ChatToolEvent>;
+
 @WebSocketGateway({ path: '/ws', cors: { origin: true } })
 export class RealtimeGateway implements OnGatewayConnection {
   @WebSocketServer()
@@ -57,9 +82,21 @@ export class RealtimeGateway implements OnGatewayConnection {
 
   emitChatDone(
     userId: string,
-    payload: { conversationId: string; messageId: string; source: 'cache' | 'live'; grounded?: boolean },
+    payload: {
+      conversationId: string;
+      messageId: string;
+      source: 'cache' | 'live';
+      grounded?: boolean;
+      stats?: ChatTurnStats;
+      toolEvents?: ChatToolEvent[];
+    },
   ) {
     this.server.to(`user:${userId}`).emit('chat:done', payload);
+  }
+
+  /** Live agent-loop progress: thinking rounds and per-tool start/end events. */
+  emitChatStatus(userId: string, payload: ChatStatusPayload) {
+    this.server.to(`user:${userId}`).emit('chat:status', payload);
   }
 
   emitPendingAction(
