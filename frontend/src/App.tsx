@@ -7,6 +7,8 @@ import { ApprovalsPage, type ScheduledReport } from './components/ApprovalsPage'
 import { AutonomyPage, type AgentGoal, type AgentMetrics, type AgentRun } from './components/AutonomyPage';
 import { ApiKeysCard } from './components/ApiKeysCard';
 import { CommandCenter } from './components/CommandCenter';
+import { MyModelsCard } from './components/MyModelsCard';
+import { AutopilotBar } from './components/AutopilotBar';
 import { BoardPage } from './components/BoardPage';
 import { AuthPage } from './components/AuthPages';
 import { Sidebar, type Tab } from './components/Sidebar';
@@ -534,7 +536,17 @@ function App() {
         {tab === 'board' && <BoardPage client={client} onProposed={showToast} />}
 
         {tab === 'autonomy' && (
-          <AutonomyPage
+          <div>
+            {role === 'admin' && (
+              <AutopilotBar
+                client={client}
+                onDispatched={() => {
+                  showToast('Autopilot patrol dispatched — watch the runs list.');
+                  void loadAgents();
+                }}
+              />
+            )}
+            <AutonomyPage
             goals={agentGoals}
             runs={agentRuns}
             onCreateGoal={(g) =>
@@ -579,6 +591,7 @@ function App() {
             }}
             metrics={agentMetrics}
           />
+          </div>
         )}
 
         {tab === 'approvals' && (
@@ -608,6 +621,7 @@ function App() {
               onExport={() => void exportCsv('/api/token-usage/export.csv', 'factorypilot-token-usage.csv')}
             />
             {role === 'admin' && <CommandCenter client={client} />}
+            <MyModelsCard client={client} />
             <ApiKeysCard client={client} />
           </div>
         )}

@@ -81,6 +81,7 @@ function buildFakes() {
   ];
   let round = 0;
   const providerFactory = {
+    getProviderForUser: (_userId: string, _models: unknown[]) => providerFactory.getProvider(),
     getProvider: () => ({
       complete: async (msgs: LlmChatMessage[]) => {
         providerRounds.push(JSON.parse(JSON.stringify(msgs)));

@@ -125,7 +125,7 @@ export class AgentsService {
     displayName: string;
     warehouseId: string;
     goal?: AgentGoal | null;
-    trigger: 'manual' | 'chat' | 'schedule' | 'alert' | 'event';
+    trigger: 'manual' | 'chat' | 'schedule' | 'alert' | 'event' | 'autopilot';
   }) {
     const goal = options.goal ?? null;
     const threshold = goal?.threshold ?? 50;
@@ -905,7 +905,112 @@ export class AgentsService {
 
   /** OUTCOME TRACKING (beta): did completed replenishment runs actually fix the problem? */
   @Cron('*/20 * * * *')
+  /**
+   * AUTOPILOT SUPERVISOR (beta, Phase N): a meta-agent that patrols every
+   * warehouse for each autopilot-enabled organization and decides which
+   * specialist agent to dispatch — the end-to-end agentic loop. Runs every
+   * 30 minutes; per-warehouse+agent runs are deduplicated to one per 6 hours.
+   */
+  @Cron('*/30 * * * *')
+  async runAutopilotCron() {
+    await this.runAutopilot();
+  }
+
+  async runAutopilot() {
+    const orgs = await this.db.query<{ id: string; name: string }>(
+      'SELECT id, name FROM organizations WHERE autopilot = true',
+    );
+    for (const org of orgs.rows) {
+      const admin = await this.db.query<{ id: string; display_name: string }>(
+        `SELECT id, display_name FROM users WHERE org_id = $1 AND role = 'admin' ORDER BY created_at ASC LIMIT 1`,
+        [org.id],
+      );
+      const owner = admin.rows[0];
+      if (!owner) {
+        continue;
+      }
+      const dispatched: string[] = [];
+      for (const warehouseId of ['1010', '1020', '1030', '1040', '1050']) {
+        try {
+          const actions = await this.autopilotAssess(owner.id, warehouseId);
+          for (const agent of actions) {
+            if (await this.ranRecently(agent, warehouseId, 6)) {
+              continue;
+            }
+            const goal = await this.ensureGoal(owner.id, agent, warehouseId);
+            await this.startRun({
+              userId: owner.id,
+              displayName: `Autopilot (${owner.display_name})`,
+              warehouseId,
+              goal,
+              trigger: 'autopilot',
+            });
+            dispatched.push(`${agent} → WH ${warehouseId}`);
+          }
+        } catch (error) {
+          this.logger.warn(`Autopilot assess failed for WH ${warehouseId}: ${error instanceof Error ? error.message : 'unknown'}`);
+        }
+      }
+      if (dispatched.length > 0) {
+        await this.notifyOwner(owner.id, 'Autopilot dispatch', `Dispatched ${dispatched.length} run(s): ${dispatched.join(', ')}`);
+      }
+    }
+    return { success: true };
+  }
+
+  /** Decides which agents a warehouse needs right now. */
+  private async autopilotAssess(userId: string, warehouseId: string): Promise<string[]> {
+    const agents: string[] = [];
+
+    const forecastFresh = await this.redis.raw.get(`forecast:${warehouseId}`);
+    if (!forecastFresh) {
+      agents.push('forecast');
+    }
+
+    const low = (await this.mcp.callTool('getLowStock', { warehouseId, threshold: 50 })) as {
+      structuredContent?: { records?: Array<Record<string, unknown>> };
+    };
+    if ((low.structuredContent?.records ?? []).length > 0) {
+      agents.push('replenishment');
+    }
+
+    const pos = (await this.mcp.callTool('getPurchaseOrders', { warehouseId })) as {
+      structuredContent?: { records?: Array<Record<string, unknown>> };
+    };
+    const today = new Date().toISOString().slice(0, 10);
+    const overdue = (pos.structuredContent?.records ?? []).some(
+      (po) => po.status !== 'delivered' && typeof po.expectedDelivery === 'string' && String(po.expectedDelivery) < today,
+    );
+    if (overdue) {
+      agents.push('po_followup');
+    }
+
+    return agents;
+  }
+
+  private async ranRecently(agent: string, warehouseId: string, hours: number): Promise<boolean> {
+    const row = await this.db.query<{ n: string }>(
+      `SELECT COUNT(*)::int AS n FROM agent_runs
+       WHERE agent = $1 AND warehouse_id = $2 AND started_at > NOW() - ($3 || ' hours')::interval`,
+      [agent, warehouseId, String(hours)],
+    );
+    return Number(row.rows[0]?.n || 0) > 0;
+  }
+
+  /** Finds the owner's goal for agent+warehouse, creating an observe/propose one if missing. */
+  private async ensureGoal(userId: string, agent: string, warehouseId: string): Promise<AgentGoal> {
+    const existing = await this.db.query<AgentGoal>(
+      'SELECT * FROM agent_goals WHERE user_id = $1 AND agent = $2 AND warehouse_id = $3 AND active = true LIMIT 1',
+      [userId, agent, warehouseId],
+    );
+    if (existing.rows[0]) {
+      return existing.rows[0];
+    }
+    return this.createGoal(userId, { warehouseId, agent, autonomy: 'propose' });
+  }
+
   async checkOutcomes() {
+    await this.checkForecastOutcomes();
     const runs = await this.db.query<{ id: string; user_id: string; warehouse_id: string; goal_text: string }>(
       `SELECT id, user_id, warehouse_id, goal_text
        FROM agent_runs
@@ -952,6 +1057,52 @@ export class AgentsService {
   }
 
   /** EPISODIC MEMORY (beta): short keyed summaries of what happened. */
+  /** Phase O (beta): score past forecasts against demand that actually happened. */
+  private async checkForecastOutcomes() {
+    const runs = await this.db.query<{ id: string; user_id: string; warehouse_id: string }>(
+      `SELECT id, user_id, warehouse_id FROM agent_runs
+       WHERE agent = 'forecast' AND status = 'completed' AND outcome IS NULL
+         AND finished_at < NOW() - INTERVAL '30 minutes'
+       LIMIT 5`,
+    );
+    for (const run of runs.rows) {
+      try {
+        const raw = await this.redis.raw.get(`forecast:${run.warehouse_id}`);
+        if (!raw) {
+          continue;
+        }
+        const cache = JSON.parse(raw) as { forecasts: Record<string, { dailyDemand: number }> };
+        const trend = (await this.mcp.callTool('getDemandTrend', { warehouseId: run.warehouse_id, days: 7, byProduct: true })) as {
+          structuredContent?: { records?: Array<Record<string, unknown>> };
+        };
+        const actualByMat = new Map<string, number>();
+        for (const r of trend.structuredContent?.records ?? []) {
+          const mat = String(r.materialId || r.productId || '');
+          actualByMat.set(mat, (actualByMat.get(mat) ?? 0) + Number(r.totalQty || 0));
+        }
+        const errors: number[] = [];
+        for (const [mat, f] of Object.entries(cache.forecasts)) {
+          const actualDaily = (actualByMat.get(mat) ?? 0) / 7;
+          if (actualDaily > 0) {
+            errors.push(Math.abs(f.dailyDemand - actualDaily) / actualDaily);
+          }
+        }
+        if (errors.length === 0) {
+          continue;
+        }
+        const mape = Math.round((errors.reduce((a, b) => a + b, 0) / errors.length) * 100);
+        const outcome =
+          mape <= 30
+            ? `Effective: forecast within ${mape}% of actual demand across ${errors.length} material(s).`
+            : `Partially effective: forecast off by ${mape}% vs actual demand (${errors.length} material(s)).`;
+        await this.db.query('UPDATE agent_runs SET outcome = $1, outcome_checked_at = NOW() WHERE id = $2', [outcome, run.id]);
+        await this.addStep(run.id, 'outcome', outcome, 'ok');
+      } catch (error) {
+        this.logger.warn(`Forecast outcome check failed: ${error instanceof Error ? error.message : 'unknown'}`);
+      }
+    }
+  }
+
   async recordEpisode(scopeKey: string, summary: string) {
     await this.db.query('INSERT INTO episodic_memory(scope_key, summary) VALUES($1, $2)', [scopeKey, summary]);
   }

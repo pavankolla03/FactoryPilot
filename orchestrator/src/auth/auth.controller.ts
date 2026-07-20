@@ -74,4 +74,39 @@ export class AuthController {
   revokeKey(@CurrentUser() user: AuthUser, @Param('id') id: string) {
     return this.authService.revokeApiKey(user.id, id);
   }
+
+  // ---------- BYOM: user-registered models (beta, Phase M) ----------
+
+  @Get('/models')
+  @UseGuards(AuthGuard)
+  listModels(@CurrentUser() user: AuthUser) {
+    return this.authService.listUserModels(user.id);
+  }
+
+  @Post('/models')
+  @UseGuards(AuthGuard)
+  addModel(@CurrentUser() user: AuthUser, @Body() body: unknown) {
+    const parsed = z
+      .object({
+        name: z.string().min(1).max(60),
+        baseUrl: z.string().url().max(300),
+        modelId: z.string().min(1).max(120),
+        apiKey: z.string().min(1).max(500),
+      })
+      .parse(body);
+    return this.authService.addUserModel(user.id, parsed);
+  }
+
+  @Post('/models/:id/toggle')
+  @UseGuards(AuthGuard)
+  toggleModel(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() body: unknown) {
+    const parsed = z.object({ active: z.boolean() }).parse(body);
+    return this.authService.toggleUserModel(user.id, id, parsed.active);
+  }
+
+  @Delete('/models/:id')
+  @UseGuards(AuthGuard)
+  deleteModel(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.authService.deleteUserModel(user.id, id);
+  }
 }

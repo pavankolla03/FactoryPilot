@@ -66,12 +66,23 @@ export class AdminController {
   @Get('/org')
   async orgProfile(@CurrentUser() admin: AuthUser) {
     const row = await this.db.query(
-      `SELECT o.id, o.name, o.join_code, o.created_at,
+      `SELECT o.id, o.name, o.join_code, o.autopilot, o.created_at,
               (SELECT COUNT(*)::int FROM users WHERE org_id = o.id) AS member_count
        FROM organizations o JOIN users u ON u.org_id = o.id WHERE u.id = $1`,
       [admin.id],
     );
     return row.rows[0] ?? null;
+  }
+
+  /** Autopilot toggle (beta, Phase N): org-level kill switch for the supervisor. */
+  @Patch('/org/autopilot')
+  async setAutopilot(@CurrentUser() admin: AuthUser, @Body() body: unknown) {
+    const parsed = z.object({ enabled: z.boolean() }).parse(body);
+    await this.db.query(
+      'UPDATE organizations SET autopilot = $1 WHERE id = (SELECT org_id FROM users WHERE id = $2)',
+      [parsed.enabled, admin.id],
+    );
+    return { autopilot: parsed.enabled };
   }
 
   /** GDPR-style data deletion (beta): purge a user's conversational and telemetry data, keep the account. */

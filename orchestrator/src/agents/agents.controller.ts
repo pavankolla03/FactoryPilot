@@ -169,6 +169,13 @@ export class AgentsController {
     return { success: true };
   }
 
+  /** Autopilot (beta, Phase N): dispatch the supervisor across all warehouses now. */
+  @Post('/autopilot/run')
+  @UseGuards(AuthGuard, AdminGuard)
+  runAutopilot() {
+    return this.agents.runAutopilot();
+  }
+
   /** Admin: run outcome checks now (demo / testing). */
   @Post('/admin/run-outcome-checks')
   @UseGuards(AuthGuard, AdminGuard)

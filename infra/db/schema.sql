@@ -225,3 +225,17 @@ CREATE TABLE IF NOT EXISTS eval_cases (
   source TEXT NOT NULL DEFAULT 'feedback',
   created_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
+
+CREATE TABLE IF NOT EXISTS user_models (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  base_url TEXT NOT NULL,
+  model_id TEXT NOT NULL,
+  api_key_enc TEXT NOT NULL,
+  active BOOLEAN NOT NULL DEFAULT true,
+  created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+  last_used_at TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_user_models_user ON user_models (user_id) WHERE active = true;
+ALTER TABLE organizations ADD COLUMN IF NOT EXISTS autopilot BOOLEAN NOT NULL DEFAULT false;

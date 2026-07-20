@@ -3,6 +3,7 @@ import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
 import { DbService } from '../common/db.service';
 import { throwApiError } from '../common/errors';
+import { openSecret, sealSecret } from '../common/secret-box';
 import type { AuthUser, WarehouseScope } from '../common/types';
 
 // @sap/xssec v4 ships no TypeScript types; keep the surface we use narrow.
@@ -354,6 +355,54 @@ export class AuthService {
   async revokeApiKey(userId: string, id: string) {
     await this.db.query('UPDATE api_keys SET revoked = true WHERE id = $1 AND user_id = $2', [id, userId]);
     return { success: true };
+  }
+
+  // ---------- BYOM: user-registered models (beta, Phase M) ----------
+
+  async listUserModels(userId: string) {
+    const rows = await this.db.query(
+      `SELECT id, name, base_url, model_id, active, created_at, last_used_at
+       FROM user_models WHERE user_id = $1 ORDER BY created_at ASC`,
+      [userId],
+    );
+    return rows.rows;
+  }
+
+  async addUserModel(userId: string, m: { name: string; baseUrl: string; modelId: string; apiKey: string }) {
+    const row = await this.db.query(
+      `INSERT INTO user_models(user_id, name, base_url, model_id, api_key_enc)
+       VALUES($1, $2, $3, $4, $5)
+       RETURNING id, name, base_url, model_id, active, created_at`,
+      [userId, m.name, m.baseUrl.replace(/\/$/, ''), m.modelId, sealSecret(m.apiKey)],
+    );
+    return row.rows[0];
+  }
+
+  async toggleUserModel(userId: string, id: string, active: boolean) {
+    await this.db.query('UPDATE user_models SET active = $1 WHERE id = $2 AND user_id = $3', [active, id, userId]);
+    return { success: true };
+  }
+
+  async deleteUserModel(userId: string, id: string) {
+    await this.db.query('DELETE FROM user_models WHERE id = $1 AND user_id = $2', [id, userId]);
+    return { success: true };
+  }
+
+  /** Decrypted configs for routing — internal use only, never returned by the API. */
+  async activeUserModelConfigs(userId: string) {
+    const rows = await this.db.query<{ id: string; name: string; base_url: string; model_id: string; api_key_enc: string }>(
+      'SELECT id, name, base_url, model_id, api_key_enc FROM user_models WHERE user_id = $1 AND active = true ORDER BY created_at ASC',
+      [userId],
+    );
+    const configs = [];
+    for (const r of rows.rows) {
+      try {
+        configs.push({ id: r.id, name: r.name, baseUrl: r.base_url, modelId: r.model_id, apiKey: openSecret(r.api_key_enc) });
+      } catch {
+        // Key sealed under a rotated secret — skip rather than fail the chat.
+      }
+    }
+    return configs;
   }
 
   async validateApiKey(key: string): Promise<AuthUser | null> {

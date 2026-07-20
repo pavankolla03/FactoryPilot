@@ -13,6 +13,8 @@ import { RedisService } from '../common/redis.service';
 import { AlertsService } from '../alerts/alerts.service';
 import { AgentsService } from '../agents/agents.service';
 import { reportModelOutcome } from '../llm/openrouter-provider';
+import { openSecret } from '../common/secret-box';
+import type { UserModelConfig } from '../llm/custom-provider';
 import type { NormalizedToolCall } from '../llm/types';
 
 const WRITE_TOOLS = new Set(['moveStock', 'draftPurchaseRequisition', 'receivePurchaseOrder', 'adjustStock']);
@@ -96,16 +98,31 @@ const LOCAL_TOOLS = [
   {
     name: 'createReplenishmentGoal',
     description:
-      "Create a standing autonomous replenishment goal: the agent will continuously watch a warehouse and keep stock above the threshold. autonomy is 'observe' (report only), 'propose' (draft orders for approval — default), or 'act' (auto-draft within the daily budget). Use when the user asks to keep a warehouse stocked automatically.",
+      "Create a standing autonomous agent goal on a warehouse. agent picks the specialist: 'replenishment' (keep stock above threshold — default), 'cycle_count' (weekly count plans), 'rebalance' (move surplus to starved locations), 'po_followup' (chase overdue purchase orders), 'forecast' (demand forecast + reorder points). autonomy is 'observe', 'propose' (default), or 'act'. Use whenever the user asks for any standing/automatic behavior on a warehouse.",
     inputSchema: {
       type: 'object',
       properties: {
         warehouseId: { type: 'string' },
+        agent: { type: 'string', enum: ['replenishment', 'cycle_count', 'rebalance', 'po_followup', 'forecast'] },
         threshold: { type: 'number' },
         autonomy: { type: 'string', enum: ['observe', 'propose', 'act'] },
         dailyBudgetQty: { type: 'number' },
       },
       required: ['warehouseId'],
+    },
+  },
+  {
+    name: 'runWhatIfScenario',
+    description:
+      'Project a demand shock with zero writes: forecasts daily demand from live movement history, scales it by demandMultiplier (e.g. 2 = demand doubles), and projects end quantities and stockout risk per material over horizonDays. Use for questions like "what happens if demand doubles?" or "will we stock out if demand rises 50%?".',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        warehouseId: { type: 'string' },
+        demandMultiplier: { type: 'number' },
+        horizonDays: { type: 'number' },
+      },
+      required: ['warehouseId', 'demandMultiplier'],
     },
   },
   {
@@ -238,7 +255,8 @@ export class ChatService {
     const conversationHistory = await this.getConversationMessages(convId);
     const llmMessages: LlmChatMessage[] = [{ role: 'system', content: systemPrompt }, ...conversationHistory];
 
-    const provider = this.providerFactory.getProvider();
+    // BYOM (beta): route to the user's own registered models first.
+    const provider = this.providerFactory.getProviderForUser(user.id, await this.userModelConfigs(user.id));
     let source: 'cache' | 'live' = 'live';
     const invokedTools: string[] = [];
     let finalText = '';
@@ -844,10 +862,23 @@ export class ChatService {
       return { structuredContent: await this.alerts.deleteSchedule(user.id, String(args.scheduleId || '')) };
     }
 
+    if (name === 'runWhatIfScenario') {
+      this.assertScope(user, String(args.warehouseId || ''), 'read');
+      const result = await this.agents.simulateScenario(
+        user.id,
+        String(args.warehouseId),
+        50,
+        Math.min(Math.max(Number(args.demandMultiplier) || 1, 0.1), 10),
+        Math.min(Math.max(Number(args.horizonDays) || 14, 1), 90),
+      );
+      return { structuredContent: result };
+    }
+
     if (name === 'createReplenishmentGoal') {
       this.assertScope(user, String(args.warehouseId || ''), 'write');
       const goal = await this.agents.createGoal(user.id, {
         warehouseId: String(args.warehouseId),
+        agent: args.agent ? String(args.agent) : undefined,
         threshold: args.threshold !== undefined ? Number(args.threshold) : undefined,
         autonomy: args.autonomy ? String(args.autonomy) : undefined,
         dailyBudgetQty: args.dailyBudgetQty !== undefined ? Number(args.dailyBudgetQty) : undefined,
@@ -1372,5 +1403,34 @@ export class ChatService {
     );
 
     this.realtime.emitSessionLog(row.rows[0]);
+  }
+
+  private readonly userModelCache = new Map<string, { at: number; configs: UserModelConfig[] }>();
+
+  /** Active BYOM configs with decrypted keys, cached 60s (beta, Phase M). */
+  private async userModelConfigs(userId: string): Promise<UserModelConfig[]> {
+    const cached = this.userModelCache.get(userId);
+    if (cached && Date.now() - cached.at < 60_000) {
+      return cached.configs;
+    }
+    const rows = await this.db.query<{ id: string; name: string; base_url: string; model_id: string; api_key_enc: string }>(
+      'SELECT id, name, base_url, model_id, api_key_enc FROM user_models WHERE user_id = $1 AND active = true ORDER BY created_at ASC',
+      [userId],
+    );
+    const configs: UserModelConfig[] = [];
+    for (const r of rows.rows) {
+      try {
+        configs.push({ id: r.id, name: r.name, baseUrl: r.base_url, modelId: r.model_id, apiKey: openSecret(r.api_key_enc) });
+      } catch {
+        // sealed under a rotated secret — skip
+      }
+    }
+    if (configs.length > 0) {
+      void this.db
+        .query('UPDATE user_models SET last_used_at = NOW() WHERE user_id = $1 AND active = true', [userId])
+        .catch(() => undefined);
+    }
+    this.userModelCache.set(userId, { at: Date.now(), configs });
+    return configs;
   }
 }
