@@ -152,14 +152,22 @@ export function ChatPage({
               </div>
             )}
 
-            {chatTurns.map((turn, idx) =>
-              turn.role === 'user' ? (
-                <div key={idx} className="flex justify-end">
-                  <div className="chat-user-block max-w-[85%] rounded-2xl px-4 py-3 text-[15px] leading-relaxed">
-                    {turn.text}
+            {chatTurns.map((turn, idx) => {
+              if (turn.role === 'user') {
+                return (
+                  <div key={idx} className="flex justify-end">
+                    <div className="chat-user-block max-w-[85%] rounded-2xl px-4 py-3 text-[15px] leading-relaxed">
+                      {turn.text}
+                    </div>
                   </div>
-                </div>
-              ) : (
+                );
+              }
+              // Skip blank assistant turns (e.g. tool-call rounds that emitted only
+              // whitespace) so they never render as an empty Otto logo block.
+              if (!turn.text.trim() && !(turn.steps && turn.steps.length)) {
+                return null;
+              }
+              return (
                 <div key={idx} className="flex gap-3.5">
                   <div className="shrink-0 pt-1">
                     <LogoMark size={28} />
@@ -204,8 +212,8 @@ export function ChatPage({
                     )}
                   </div>
                 </div>
-              ),
-            )}
+              );
+            })}
 
             {streaming && (
               <div className="flex gap-3.5">

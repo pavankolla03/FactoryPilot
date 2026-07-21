@@ -1,7 +1,7 @@
 {
   ".claude/settings.local.json": {
-    "mtime": 1784618427.4230337,
-    "ast_hash": "f12c38ca3de4d78828b32410937910f2",
+    "mtime": 1784570145.9791787,
+    "ast_hash": "cc913190ec85cc832481f0b2371ecd58",
     "semantic_hash": ""
   },
   ".eslintrc.cjs": {
@@ -95,8 +95,8 @@
     "semantic_hash": "d6eafee8e20e4fb3f8fb9f75af0f0936"
   },
   "frontend/src/components/ChatPage.tsx": {
-    "mtime": 1784618272.9887946,
-    "ast_hash": "cea2ae94f716778e5b43d4e2a0d99fa7",
+    "mtime": 1784567466.3693051,
+    "ast_hash": "0e56a8bb665442a14c23701b1c797b8e",
     "semantic_hash": ""
   },
   "frontend/src/components/Landing.tsx": {
@@ -355,8 +355,8 @@
     "semantic_hash": "e3fa6cda2492cf47bc71bee389ef526f"
   },
   "orchestrator/src/chat/chat.service.ts": {
-    "mtime": 1784618137.275163,
-    "ast_hash": "65d2c16e58fa0ca1bc7c6664069ceb13",
+    "mtime": 1784569648.692092,
+    "ast_hash": "33ae073b92d3b957c772bafdb1e99653",
     "semantic_hash": ""
   },
   "orchestrator/src/chat/confirm-action-idempotency.test.ts": {
@@ -365,9 +365,9 @@
     "semantic_hash": "83e930bfde612958399086303a951c5a"
   },
   "orchestrator/src/chat/conversations.controller.ts": {
-    "mtime": 1784618161.9816315,
-    "ast_hash": "1243d7ea471ab9d25275c496882dd109",
-    "semantic_hash": ""
+    "mtime": 1784321877.6287022,
+    "ast_hash": "3aab7131860a957f9bdb4a79fee5f644",
+    "semantic_hash": "3aab7131860a957f9bdb4a79fee5f644"
   },
   "orchestrator/src/chat/logs.controller.ts": {
     "mtime": 1784569709.1245203,
@@ -642,11 +642,6 @@
   "docs/spec-gap-analysis.md": {
     "mtime": 1784569983.5672038,
     "ast_hash": "7299c3e8cecb66a8c92107ae57623439",
-    "semantic_hash": ""
-  },
-  "docs/roadmap-phases-u-w-business-objects.md": {
-    "mtime": 1784618409.2911003,
-    "ast_hash": "2be98d31a9214692ec1a16f1dfd8b0fe",
     "semantic_hash": ""
   }
 }

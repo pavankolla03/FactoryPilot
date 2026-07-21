@@ -15,7 +15,9 @@ export class ConversationsController {
               c.title,
               c.created_at,
               MAX(m.created_at) AS last_activity,
-              COUNT(m.id) FILTER (WHERE m.role IN ('user', 'assistant'))::int AS message_count
+              COUNT(m.id) FILTER (
+                WHERE m.role IN ('user', 'assistant') AND btrim(m.content, E' \t\n\r') <> ''
+              )::int AS message_count
        FROM conversations c
        LEFT JOIN conversation_messages m ON m.conversation_id = c.id
        WHERE c.user_id = $1
@@ -60,7 +62,7 @@ export class ConversationsController {
        FROM conversation_messages
        WHERE conversation_id = $1
          AND role IN ('user', 'assistant')
-         AND content <> ''
+         AND btrim(content, E' \t\n\r') <> ''
        ORDER BY created_at ASC`,
       [id],
     );

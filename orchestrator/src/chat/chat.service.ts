@@ -340,7 +340,10 @@ export class ChatService {
             content: completion.text || '',
             toolCalls: completion.toolCalls,
           });
-          await this.insertMessage(convId, 'assistant', completion.text || '', completion.toolCalls);
+          // Some models emit a bare newline/whitespace as text alongside tool
+          // calls. Persist it as empty so it never renders as a blank Otto turn.
+          const assistantText = completion.text?.trim() ? completion.text : '';
+          await this.insertMessage(convId, 'assistant', assistantText, completion.toolCalls);
 
           const writeCalls: NormalizedToolCall[] = [];
 
