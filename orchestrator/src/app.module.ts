@@ -14,6 +14,8 @@ import { LogsController } from './chat/logs.controller';
 import { OpsController } from './ops/ops.controller';
 import { BusinessObjectsController } from './business-objects/business-objects.controller';
 import { BusinessObjectsService } from './business-objects/business-objects.service';
+import { HealthController } from './health/health.controller';
+import { HealthService } from './health/health.service';
 import { DbService } from './common/db.service';
 import { RedisService } from './common/redis.service';
 import { LlmProviderFactory } from './llm/provider.factory';
@@ -32,6 +34,7 @@ import { RealtimeGateway } from './realtime/realtime.gateway';
     OpsController,
     AgentsController,
     BusinessObjectsController,
+    HealthController,
   ],
   providers: [
     DbService,
@@ -44,6 +47,7 @@ import { RealtimeGateway } from './realtime/realtime.gateway';
     AlertsService,
     AgentsService,
     BusinessObjectsService,
+    HealthService,
   ],
 })
 export class AppModule {}

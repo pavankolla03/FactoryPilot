@@ -6,3 +6,7 @@ dist
 coverage
 *.log
 .DS_Store
+
+# generated pitch deck deliverables
+FactoryPilot-Client-Briefing.pptx
+FactoryPilot-Client-Briefing.pdf

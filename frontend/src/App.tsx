@@ -24,6 +24,7 @@ import { ActivityPage } from './components/ActivityPage';
 import { UsersPage, type AdminUser, type WarehousePolicy } from './components/UsersPage';
 import { CachePoliciesCard } from './components/CachePoliciesCard';
 import { BusinessObjectsCard } from './components/BusinessObjectsCard';
+import { WarehouseHealthCard } from './components/WarehouseHealthCard';
 import { AnalyticsPage, type AnalyticsOverview } from './components/AnalyticsPage';
 import { Icon, PageHeader, paths } from './components/ui';
 import { useI18n } from './i18n';
@@ -601,6 +602,15 @@ function App() {
 
         {tab === 'autonomy' && (
           <div>
+            <WarehouseHealthCard
+              client={client}
+              onExplain={(wh) => {
+                setTab('chat');
+                void sendChat(
+                  `Explain the health score for warehouse ${wh}: what is the biggest risk driving it down, and what should I do about it?`,
+                );
+              }}
+            />
             {role === 'admin' && (
               <AutopilotBar
                 client={client}

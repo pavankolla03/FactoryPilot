@@ -14,6 +14,7 @@ import { RedisService } from '../common/redis.service';
 import { AlertsService } from '../alerts/alerts.service';
 import { AgentsService } from '../agents/agents.service';
 import { BusinessObjectsService } from '../business-objects/business-objects.service';
+import { HealthService } from '../health/health.service';
 import { hydrateModelOutcomes, reportModelOutcome } from '../llm/openrouter-provider';
 import { openSecret } from '../common/secret-box';
 import type { UserModelConfig } from '../llm/custom-provider';
@@ -153,6 +154,16 @@ const LOCAL_TOOLS = [
     },
   },
   {
+    name: 'getWarehouseHealth',
+    description:
+      'Get the composite health score (0-100) for a warehouse with its factor breakdown — days-of-cover, low stock, PO aging and movement anomalies — plus trend and the biggest detractor. Use for "are we OK?", "how healthy is warehouse X?", "why is the score low?", or to investigate/explain a warehouse\'s health. Returns the factors so you can name the biggest risk and recommend an action (reorder, chase POs, investigate a move).',
+    inputSchema: {
+      type: 'object',
+      properties: { warehouseId: { type: 'string' } },
+      required: ['warehouseId'],
+    },
+  },
+  {
     name: 'queryBusinessObject',
     description:
       'Query a registered SAP business object via the metadata-driven OData registry and get a contextualized summary (status counts, breakdowns, overdue/today/upcoming buckets) plus the records. objectCode options: SALES (sales orders), DELIVERY (outbound deliveries), SHIPPING (shipments by carrier/route), GOODS_MOVEMENT (SAP material documents / postings, movement types like 101 receipt and 601 issue — use this for "goods movements", "postings", "material documents", NOT for simple stock moves), PURCHASING (purchase orders). Set todayOnly=true for "today" questions (e.g. "orders to be delivered today"). Pass warehouseId when a warehouse/plant is named or implied. Use the returned summary object to answer questions about how many are shipped/pending/overdue or which carrier/supplier — do not call other tools for that.',
@@ -183,6 +194,7 @@ export class ChatService {
     private readonly alerts: AlertsService,
     private readonly agents: AgentsService,
     private readonly businessObjects: BusinessObjectsService,
+    private readonly health: HealthService,
   ) {}
 
   async getUsage(userId: string) {
@@ -1151,6 +1163,13 @@ export class ChatService {
           })),
         },
       };
+    }
+
+    if (name === 'getWarehouseHealth') {
+      const warehouseId = String(args.warehouseId || '');
+      this.assertScope(user, warehouseId, 'read');
+      const health = await this.health.detail(user, warehouseId);
+      return { structuredContent: health };
     }
 
     if (name === 'queryBusinessObject') {

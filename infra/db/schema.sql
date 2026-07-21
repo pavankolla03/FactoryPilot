@@ -335,3 +335,16 @@ UPDATE business_objects SET status_field = 'GoodsMovementType',
 UPDATE business_objects SET status_field = 'DeliveryStatus',
   status_labels = '{"open":"Open","delivered":"Delivered"}'::jsonb, group_by = 'Supplier'
   WHERE object_code = 'PURCHASING' AND org_id IS NULL AND status_field IS NULL;
+
+-- Phase X: Warehouse Health Score history (for trend). One snapshot per warehouse
+-- per hour; the score is a weighted composite of coverage, low-stock, PO aging and
+-- movement-anomaly factors.
+CREATE TABLE IF NOT EXISTS warehouse_health (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  org_id UUID,
+  warehouse_id TEXT NOT NULL,
+  score INT NOT NULL,
+  factors JSONB NOT NULL DEFAULT '[]'::jsonb,
+  computed_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_warehouse_health ON warehouse_health (warehouse_id, computed_at DESC);

@@ -10,6 +10,7 @@ import type { RealtimeGateway } from '../realtime/realtime.gateway';
 import type { AlertsService } from '../alerts/alerts.service';
 import type { AgentsService } from '../agents/agents.service';
 import type { BusinessObjectsService } from '../business-objects/business-objects.service';
+import type { HealthService } from '../health/health.service';
 import type { AuthUser } from '../common/types';
 
 interface StoredMessage {
@@ -147,6 +148,11 @@ function buildFakes() {
     query: async () => ({ objectCode: '', objectName: '', dataSource: 'simulator', records: [] }),
   } as unknown as BusinessObjectsService;
 
+  const health = {
+    detail: async () => ({ warehouseId: '1010', score: 90, band: 'healthy', trend: null, detractor: null, factors: [], computedAt: '' }),
+    overview: async () => [],
+  } as unknown as HealthService;
+
   return {
     db,
     redis,
@@ -157,6 +163,7 @@ function buildFakes() {
     alerts,
     agentsSvc,
     businessObjects,
+    health,
     providerRounds,
     sessionLogs,
     messages,
@@ -184,6 +191,7 @@ describe('agent loop', () => {
       fakes.alerts,
       fakes.agentsSvc,
       fakes.businessObjects,
+      fakes.health,
     );
 
     const response = await service.chat(user, undefined, 'how much MAT-1 in 1010?');
@@ -216,6 +224,7 @@ describe('agent loop', () => {
       fakes.alerts,
       fakes.agentsSvc,
       fakes.businessObjects,
+      fakes.health,
     );
 
     await service.chat(user, undefined, 'how much MAT-1 in 1010?');

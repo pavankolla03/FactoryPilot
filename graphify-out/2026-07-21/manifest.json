@@ -1,7 +1,7 @@
 {
   ".claude/settings.local.json": {
-    "mtime": 1784632417.9431746,
-    "ast_hash": "6aa9c227b1e5fa5ac16fe459a57460f5",
+    "mtime": 1784649396.326987,
+    "ast_hash": "1b12146c543e58dc08f180b73009995e",
     "semantic_hash": ""
   },
   ".eslintrc.cjs": {
@@ -535,8 +535,8 @@
     "semantic_hash": "9311fb535259f83acc804d6e3e190c06"
   },
   "infra/docker-compose.yml": {
-    "mtime": 1784627409.793681,
-    "ast_hash": "73b0a2fdc0a30ae255102f1f19fed834",
+    "mtime": 1784645717.2636456,
+    "ast_hash": "3af992c057ea2e75d7d53f613eb89bfb",
     "semantic_hash": ""
   },
   "infra/manifest.yml": {
@@ -645,8 +645,8 @@
     "semantic_hash": ""
   },
   "docs/roadmap-phases-u-w-business-objects.md": {
-    "mtime": 1784634860.0244944,
-    "ast_hash": "1640b849f5a71fd6be0380e6347a5dfa",
+    "mtime": 1784649493.268812,
+    "ast_hash": "b000b5055522222035e1ee23f0e08456",
     "semantic_hash": ""
   },
   "frontend/src/components/BusinessObjectsCard.tsx": {
@@ -655,8 +655,8 @@
     "semantic_hash": ""
   },
   "integration-mocks/iflow-simulator/src/odata-fixtures.ts": {
-    "mtime": 1784626441.944723,
-    "ast_hash": "c27bcef0b1c6cece8416e1d603eb6271",
+    "mtime": 1784645706.3777044,
+    "ast_hash": "265fa1bdcb73843975dc4bdc0680cc98",
     "semantic_hash": ""
   },
   "orchestrator/src/business-objects/business-objects.controller.ts": {
@@ -665,13 +665,23 @@
     "semantic_hash": ""
   },
   "orchestrator/src/business-objects/business-objects.service.ts": {
-    "mtime": 1784631896.0419805,
-    "ast_hash": "13f9bf9655198565c451ba0c0453233f",
+    "mtime": 1784645693.1176667,
+    "ast_hash": "194d20b1c20d458f27cc9c86ace91498",
     "semantic_hash": ""
   },
   "orchestrator/src/business-objects/business-object-context.ts": {
     "mtime": 1784631469.3897898,
     "ast_hash": "502f95ec3c4a99fae4e3c92bbb4a9ca5",
+    "semantic_hash": ""
+  },
+  "orchestrator/src/business-objects/sap-iflow.client.ts": {
+    "mtime": 1784645631.2633235,
+    "ast_hash": "e8ff9dc4f5c2bdb7fcf65421ecb1bcd7",
+    "semantic_hash": ""
+  },
+  "docs/sap-iflow-contract.md": {
+    "mtime": 1784645770.0057938,
+    "ast_hash": "5f2da341276154238808a97a67c44af7",
     "semantic_hash": ""
   }
 }
