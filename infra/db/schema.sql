@@ -262,3 +262,54 @@ ALTER TABLE session_logs ADD COLUMN IF NOT EXISTS llm_ms INT;
 ALTER TABLE session_logs ADD COLUMN IF NOT EXISTS payload_bytes INT;
 ALTER TABLE session_logs ADD COLUMN IF NOT EXISTS error_detail TEXT;
 ALTER TABLE session_logs ADD COLUMN IF NOT EXISTS tools_detail JSONB;
+
+-- Phase U (spec App #1): metadata-driven Business Object registry. A functional
+-- consultant registers an SAP OData object here and it becomes queryable with no
+-- code change, served through the generic iFlow OData passthrough.
+CREATE TABLE IF NOT EXISTS business_objects (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  org_id UUID REFERENCES organizations(id) ON DELETE CASCADE,
+  object_code TEXT NOT NULL,
+  object_name TEXT NOT NULL,
+  keywords TEXT NOT NULL DEFAULT '',
+  destination_name TEXT,
+  odata_service_path TEXT NOT NULL,
+  entity_set TEXT NOT NULL,
+  default_filters TEXT,
+  select_fields TEXT,
+  date_field TEXT,
+  api_version TEXT NOT NULL DEFAULT 'v2',
+  top_limit INT NOT NULL DEFAULT 50,
+  is_active BOOLEAN NOT NULL DEFAULT true,
+  created_by TEXT,
+  created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+  modified_by TEXT,
+  modified_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_business_objects_org ON business_objects (org_id) WHERE is_active = true;
+
+-- Seed the five spec business objects as global templates (org_id NULL).
+INSERT INTO business_objects (object_code, object_name, keywords, odata_service_path, entity_set, default_filters, select_fields, date_field, api_version, top_limit)
+SELECT * FROM (VALUES
+  ('SALES', 'Sales Orders',
+   'orders, sales order, SO, sell, customer order',
+   '/sap/opu/odata/sap/API_SALES_ORDER_SRV', 'A_SalesOrder',
+   'Plant eq ''{warehouseId}''', 'SalesOrder,SoldToPartyName,Plant,OverallStatus,RequestedDeliveryDate,TotalNetAmount', 'RequestedDeliveryDate', 'v2', 50),
+  ('DELIVERY', 'Outbound Deliveries',
+   'delivery, deliveries, deliver, outbound, to be delivered, shipment',
+   '/sap/opu/odata/sap/API_OUTBOUND_DELIVERY_SRV', 'A_OutboundDelivery',
+   'Warehouse eq ''{warehouseId}''', 'DeliveryDocument,Warehouse,Route,Carrier,GoodsMovementStatus,PlannedGoodsIssueDate', 'PlannedGoodsIssueDate', 'v2', 50),
+  ('SHIPPING', 'Shipping',
+   'shipping, ship, shipped, carrier, freight, route',
+   '/sap/opu/odata/sap/API_OUTBOUND_DELIVERY_SRV', 'A_OutboundDelivery',
+   'Warehouse eq ''{warehouseId}''', 'DeliveryDocument,Warehouse,Route,Carrier,ShippingStatus,PlannedGoodsIssueDate', 'PlannedGoodsIssueDate', 'v2', 50),
+  ('GOODS_MOVEMENT', 'Goods Movements',
+   'goods movement, movement, material document, posting, 101, 601, receipt, issue',
+   '/sap/opu/odata/sap/API_MATERIAL_DOCUMENT_SRV', 'A_MaterialDocumentItem',
+   'Plant eq ''{warehouseId}''', 'MaterialDocument,GoodsMovementType,Material,Plant,QuantityInEntryUnit,PostingDate', 'PostingDate', 'v2', 100),
+  ('PURCHASING', 'Purchase Orders',
+   'purchasing, purchase order, PO, procurement, buy, supplier order',
+   '/sap/opu/odata/sap/API_PURCHASEORDER_PROCESS_SRV', 'A_PurchaseOrderItem',
+   'Plant eq ''{warehouseId}''', 'PurchaseOrder,Material,Plant,OrderQuantity,DeliveryStatus,Supplier,DeliveryDate', 'DeliveryDate', 'v2', 50)
+) AS seed(object_code, object_name, keywords, odata_service_path, entity_set, default_filters, select_fields, date_field, api_version, top_limit)
+WHERE NOT EXISTS (SELECT 1 FROM business_objects b WHERE b.object_code = seed.object_code AND b.org_id IS NULL);

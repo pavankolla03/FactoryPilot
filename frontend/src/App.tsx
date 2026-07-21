@@ -23,6 +23,7 @@ import {
 import { ActivityPage } from './components/ActivityPage';
 import { UsersPage, type AdminUser, type WarehousePolicy } from './components/UsersPage';
 import { CachePoliciesCard } from './components/CachePoliciesCard';
+import { BusinessObjectsCard } from './components/BusinessObjectsCard';
 import { AnalyticsPage, type AnalyticsOverview } from './components/AnalyticsPage';
 import { Icon, PageHeader, paths } from './components/ui';
 import { useI18n } from './i18n';
@@ -743,7 +744,12 @@ function App() {
                 await refreshUsers();
               }, url ? 'Webhook saved — notifications will be delivered there.' : 'Webhook removed.')
             }
-            cachePoliciesSlot={<CachePoliciesCard client={client} onSaved={showToast} />}
+            cachePoliciesSlot={
+              <>
+                <BusinessObjectsCard client={client} onSaved={showToast} />
+                <CachePoliciesCard client={client} onSaved={showToast} />
+              </>
+            }
             warehousePolicies={warehousePolicies}
             onWarehousePolicy={(warehouseId, maxQty, makerChecker) =>
               withFeedback(async () => {

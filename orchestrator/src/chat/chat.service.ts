@@ -13,6 +13,7 @@ import type { ChatToolEvent } from '../realtime/realtime.gateway';
 import { RedisService } from '../common/redis.service';
 import { AlertsService } from '../alerts/alerts.service';
 import { AgentsService } from '../agents/agents.service';
+import { BusinessObjectsService } from '../business-objects/business-objects.service';
 import { hydrateModelOutcomes, reportModelOutcome } from '../llm/openrouter-provider';
 import { openSecret } from '../common/secret-box';
 import type { UserModelConfig } from '../llm/custom-provider';
@@ -151,6 +152,20 @@ const LOCAL_TOOLS = [
       required: ['warehouseId'],
     },
   },
+  {
+    name: 'queryBusinessObject',
+    description:
+      'Query a registered SAP business object (Sales Orders, Deliveries, Shipping, Goods Movements, Purchase Orders, or any admin-registered object) via the metadata-driven OData registry. Use for questions about orders, deliveries, shipments, goods movements/postings, or purchase orders. Pass objectCode (e.g. SALES, DELIVERY, SHIPPING, GOODS_MOVEMENT, PURCHASING). Set todayOnly=true for "today" questions (e.g. "orders to be delivered today"). Pass warehouseId when the user names or implies a warehouse/plant.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        objectCode: { type: 'string' },
+        warehouseId: { type: 'string' },
+        todayOnly: { type: 'boolean' },
+      },
+      required: ['objectCode'],
+    },
+  },
 ];
 
 @Injectable()
@@ -167,6 +182,7 @@ export class ChatService {
     private readonly realtime: RealtimeGateway,
     private readonly alerts: AlertsService,
     private readonly agents: AgentsService,
+    private readonly businessObjects: BusinessObjectsService,
   ) {}
 
   async getUsage(userId: string) {
@@ -253,6 +269,15 @@ export class ChatService {
     const episodeNote = episodes.length
       ? ` Relevant recent history: ${episodes.join(' | ')}`
       : '';
+
+    // Registered business objects (spec App #1): tell Otto which objectCodes the
+    // metadata-driven queryBusinessObject tool can answer, and their keywords.
+    const businessObjects = await this.businessObjects.activeObjects(user).catch(() => []);
+    const businessObjectNote = businessObjects.length
+      ? ` Registered SAP business objects for queryBusinessObject (objectCode — name — keywords): ${businessObjects
+          .map((b) => `${b.code} — ${b.name} — ${b.keywords}`)
+          .join('; ')}. Route order/delivery/shipping/goods-movement/purchasing questions to queryBusinessObject with the matching objectCode.`
+      : '';
     const systemPrompt =
       "You are Otto, FactoryPilot's warehouse copilot for SAP manufacturing. " +
       'Style: open with a one-sentence direct answer, then add structure only when it helps — markdown tables for records, ' +
@@ -264,7 +289,8 @@ export class ChatService {
       'Copy parameter values exactly as the user stated them (e.g. location names like "packing" or "shipping"). ' +
       'You can create stock alerts (createStockAlert) when the user asks to be notified about stock levels.' +
       preferenceNote +
-      episodeNote;
+      episodeNote +
+      businessObjectNote;
 
     const conversationHistory = await this.getConversationMessages(convId);
     const llmMessages: LlmChatMessage[] = [{ role: 'system', content: systemPrompt }, ...conversationHistory];
@@ -1123,6 +1149,28 @@ export class ChatService {
             materialId: a.material_id,
             threshold: a.threshold,
           })),
+        },
+      };
+    }
+
+    if (name === 'queryBusinessObject') {
+      const warehouseId = args.warehouseId ? String(args.warehouseId) : undefined;
+      if (warehouseId) {
+        this.assertScope(user, warehouseId, 'read');
+      }
+      const result = await this.businessObjects.query(user, {
+        objectCode: String(args.objectCode || '').trim().toUpperCase(),
+        warehouseId,
+        todayOnly: Boolean(args.todayOnly),
+        top: args.top !== undefined ? Number(args.top) : undefined,
+      });
+      return {
+        structuredContent: {
+          objectCode: result.objectCode,
+          objectName: result.objectName,
+          dataSource: result.dataSource,
+          count: result.records.length,
+          records: result.records,
         },
       };
     }

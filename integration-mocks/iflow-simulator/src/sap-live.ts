@@ -175,6 +175,30 @@ export async function searchLiveMaterials(query: string): Promise<Array<Material
   }));
 }
 
+/**
+ * Generic OData read for the Business Object registry (Phase U/W). Calls any
+ * configured service + entity set with $filter/$select/$top and returns the raw
+ * rows, so a new object needs config only — no new code in the live path.
+ */
+export async function fetchLiveOData(
+  service: string,
+  entitySet: string,
+  opts: { filter?: string; select?: string; top?: number },
+): Promise<Array<Record<string, unknown>>> {
+  const params: Record<string, string> = {};
+  if (opts.filter) {
+    params.$filter = opts.filter;
+  }
+  if (opts.select) {
+    params.$select = opts.select;
+  }
+  params.$top = String(opts.top && opts.top > 0 ? opts.top : 50);
+
+  const path = `${service.replace(/\/$/, '')}/${entitySet}`;
+  const body = await sapGet(path, params);
+  return odataRows(body);
+}
+
 /** Purchase Orders — Read (API_PURCHASEORDER_PROCESS_SRV). */
 export async function fetchLivePurchaseOrders(warehouseId?: string): Promise<PurchaseOrder[]> {
   const body = await sapGet('/sap/opu/odata/sap/API_PURCHASEORDER_PROCESS_SRV/A_PurchaseOrderItem', {

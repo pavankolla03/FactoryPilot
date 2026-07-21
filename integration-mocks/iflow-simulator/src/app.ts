@@ -5,11 +5,13 @@ import { IflowState } from './state';
 import { WriteLedger } from './ledger';
 import {
   fetchLiveMaterial,
+  fetchLiveOData,
   fetchLivePurchaseOrders,
   fetchLiveStock,
   sapLiveEnabled,
   searchLiveMaterials,
 } from './sap-live';
+import { knownEntitySet, queryFixture } from './odata-fixtures';
 import type { ApiErrorShape } from './types';
 
 const logger = pino({ name: 'iflow-simulator', level: process.env.LOG_LEVEL || 'info' });
@@ -55,6 +57,59 @@ export function createApp(state = new IflowState(), ledger = new WriteLedger()) 
 
   app.post('/oauth/token', (_req, res) => {
     res.json({ access_token: 'mock-iflow-token', token_type: 'bearer', expires_in: 3600 });
+  });
+
+  /**
+   * Generic OData passthrough for the Business Object registry (Phase U). One
+   * endpoint serves every registered object: the orchestrator resolves config
+   * from Postgres, then calls here with service path + entity set + query.
+   */
+  app.get('/iflow/odata', async (req, res) => {
+    const service = String(req.query.service || '');
+    const entitySet = String(req.query.entitySet || '');
+    const filter = req.query.filter ? String(req.query.filter) : undefined;
+    const select = req.query.select ? String(req.query.select) : undefined;
+    const top = req.query.top ? Number(req.query.top) : undefined;
+    if (!service || !entitySet) {
+      return res.status(400).json(errorResponse('VALIDATION_ERROR', 'service and entitySet are required'));
+    }
+
+    try {
+      if (sapLiveEnabled()) {
+        const records = await fetchLiveOData(service, entitySet, { filter, select, top });
+        return res.json({ records, entitySet, dataSource: 'sap-sandbox' });
+      }
+      if (!knownEntitySet(entitySet)) {
+        return res
+          .status(404)
+          .json(errorResponse('VALIDATION_ERROR', `no fixture for entity set '${entitySet}' — set SAP_API_KEY for live data`));
+      }
+      const records = queryFixture(entitySet, { filter, select, top });
+      return res.json({ records, entitySet, dataSource: 'simulator' });
+    } catch (err) {
+      return res.status(502).json(errorResponse('VALIDATION_ERROR', err instanceof Error ? err.message : 'SAP error'));
+    }
+  });
+
+  /** Test-connection ($metadata ping) for the registry's validation action. */
+  app.get('/iflow/odata/metadata', async (req, res) => {
+    const service = String(req.query.service || '');
+    const entitySet = String(req.query.entitySet || '');
+    if (!service) {
+      return res.status(400).json(errorResponse('VALIDATION_ERROR', 'service is required'));
+    }
+    try {
+      if (sapLiveEnabled()) {
+        const ok = await fetchLiveOData(service, entitySet || '', { top: 1 })
+          .then(() => true)
+          .catch(() => false);
+        return res.json({ ok, mode: 'sap-sandbox', service, entitySet });
+      }
+      const ok = entitySet ? knownEntitySet(entitySet) : true;
+      return res.json({ ok, mode: 'simulator', service, entitySet });
+    } catch (err) {
+      return res.status(502).json(errorResponse('VALIDATION_ERROR', err instanceof Error ? err.message : 'SAP error'));
+    }
   });
 
   const getStockRecords = async (materialId?: string, warehouseId?: string) => {

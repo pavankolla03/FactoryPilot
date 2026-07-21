@@ -12,6 +12,8 @@ import { ChatService } from './chat/chat.service';
 import { ConversationsController } from './chat/conversations.controller';
 import { LogsController } from './chat/logs.controller';
 import { OpsController } from './ops/ops.controller';
+import { BusinessObjectsController } from './business-objects/business-objects.controller';
+import { BusinessObjectsService } from './business-objects/business-objects.service';
 import { DbService } from './common/db.service';
 import { RedisService } from './common/redis.service';
 import { LlmProviderFactory } from './llm/provider.factory';
@@ -29,6 +31,7 @@ import { RealtimeGateway } from './realtime/realtime.gateway';
     AlertsController,
     OpsController,
     AgentsController,
+    BusinessObjectsController,
   ],
   providers: [
     DbService,
@@ -40,6 +43,7 @@ import { RealtimeGateway } from './realtime/realtime.gateway';
     RealtimeGateway,
     AlertsService,
     AgentsService,
+    BusinessObjectsService,
   ],
 })
 export class AppModule {}
