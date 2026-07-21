@@ -1,16 +1,16 @@
 # Graph Report - FactoryPilot  (2026-07-21)
 
 ## Corpus Check
-- 127 files · ~94,272 words
+- 128 files · ~95,053 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 2826 nodes · 7031 edges · 188 communities (135 shown, 53 thin omitted)
+- 2832 nodes · 7042 edges · 183 communities (139 shown, 44 thin omitted)
 - Extraction: 84% EXTRACTED · 16% INFERRED · 0% AMBIGUOUS · INFERRED: 1156 edges (avg confidence: 0.58)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `12141c40`
+- Built from commit: `af6ce458`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -117,6 +117,7 @@
 - Hs
 - d
 - bl
+- _o
 - .get
 - ChatController
 - rgb
@@ -182,15 +183,10 @@
 - Ri
 - gh
 - fp
-- i6
 - Iw
-- Gn
-- Cs
-- DF
 - @nestjs/schedule
 - jd
 - KE
-- t6
 - jsonwebtoken
 
 ## God Nodes (most connected - your core abstractions)
@@ -214,8 +210,8 @@
   frontend/src/App.tsx → approuter/resources/assets/charts-C2dOeYOM.js
 - `rankByOutcome()` --indirect_call--> `b()`  [INFERRED]
   orchestrator/src/llm/openrouter-provider.ts → approuter/resources/assets/charts-C2dOeYOM.js
-- `App()` --indirect_call--> `u()`  [INFERRED]
-  frontend/src/App.tsx → approuter/resources/assets/realtime-SYmKJpIj.js
+- `createApp()` --indirect_call--> `pr()`  [INFERRED]
+  integration-mocks/iflow-simulator/src/app.ts → approuter/resources/assets/index-CL7n0V-y.js
 
 ## Import Cycles
 - None detected.
@@ -225,10 +221,10 @@
 - **Deployment Topology (local compose vs Cloud Foundry)** — infra_docker_compose_stack, infra_manifest_cf_deployment [INFERRED 0.85]
 - **FactoryPilot Brand Mark Composition** — frontend_public_favicon_factory_silhouette, frontend_public_favicon_forward_arrow, frontend_public_favicon_blue_gradient [EXTRACTED 1.00]
 
-## Communities (188 total, 53 thin omitted)
+## Communities (183 total, 44 thin omitted)
 
 ### Community 0 - "Autonomy Agents (goals, runs, critic, outcomes)"
-Cohesion: 0.14
+Cohesion: 0.16
 Nodes (3): AgentsService, Cron, Injectable
 
 ### Community 1 - "LLM Provider Layer"
@@ -236,20 +232,20 @@ Cohesion: 0.10
 Nodes (23): AnthropicProvider, normalizeAnthropicSchema(), toAnthropicMessages(), AzureOpenAIProvider, CustomModelProvider, UserModelConfig, UserRoutedProvider, toOpenAIMessages() (+15 more)
 
 ### Community 2 - "Chat Agent Loop"
-Cohesion: 0.06
-Nodes (17): ConnectedSocket, ChatController, Body, Controller, Get, Post, UseGuards, ChatService (+9 more)
+Cohesion: 0.07
+Nodes (15): ChatService, LOCAL_TOOLS, STOCK_MUTATING_TOOLS, Injectable, reportModelOutcome(), OpsController, Body, Controller (+7 more)
 
 ### Community 3 - "iFlow Simulator (SAP Mock + Live Layer)"
-Cohesion: 0.15
-Nodes (6): fixturesDir, IflowState, readFixture(), Material, MovementRecord, PurchaseOrder
+Cohesion: 0.05
+Nodes (51): ok(), createApp(), dataSource(), errorResponse(), logger, moveBodySchema, movementQuerySchema, stockQuerySchema (+43 more)
 
 ### Community 4 - "Auth, API Keys & Session Layer"
-Cohesion: 0.12
-Nodes (10): BusinessObjectsController, Body, Controller, Delete, Param, Patch, Post, UseGuards (+2 more)
+Cohesion: 0.08
+Nodes (24): dn(), vd(), ve(), wh(), Yf(), Yh(), z8(), At() (+16 more)
 
 ### Community 5 - "Orchestrator Common Services"
-Cohesion: 0.06
-Nodes (49): cachePolicySchema, createUserSchema, quotaSchema, scopesSchema, updateUserSchema, goalPatchSchema, goalSchema, createAlertSchema (+41 more)
+Cohesion: 0.05
+Nodes (56): cachePolicySchema, createUserSchema, quotaSchema, scopesSchema, updateUserSchema, goalPatchSchema, goalSchema, AgentGoal (+48 more)
 
 ### Community 6 - "MCP Warehouse-Ops Server"
 Cohesion: 0.05
@@ -268,12 +264,12 @@ Cohesion: 0.06
 Nodes (35): dependencies, express, @modelcontextprotocol/sdk, pino, zod, devDependencies, prettier, tsx (+27 more)
 
 ### Community 10 - "Autonomy Agents (goals, runs, critic, outcomes) 2"
-Cohesion: 0.07
-Nodes (32): Headers, AgentsController, Body, Controller, Get, Param, Patch, Post (+24 more)
+Cohesion: 0.06
+Nodes (33): Headers, AgentsController, Body, Controller, Get, Param, Patch, Post (+25 more)
 
 ### Community 11 - "Auth, API Keys & Session Layer 2"
 Cohesion: 0.02
-Nodes (101): ve(), z8(), _a, ac, ae, ah(), ap, bc (+93 more)
+Nodes (101): _a, ac, ae, ah(), ap, bc, bd, be (+93 more)
 
 ### Community 12 - "Shared / Package.Json"
 Cohesion: 0.09
@@ -281,15 +277,15 @@ Nodes (21): devDependencies, prettier, typescript, vitest, engines, node, pretti
 
 ### Community 13 - "Orchestrator / Package.Json"
 Cohesion: 0.10
-Nodes (21): @anthropic-ai/sdk, class-transformer, @nestjs/common, @nestjs/config, @nestjs/websockets, dependencies, @anthropic-ai/sdk, class-transformer (+13 more)
+Nodes (21): @anthropic-ai/sdk, bcryptjs, @nestjs/common, @nestjs/config, @nestjs/websockets, dependencies, @anthropic-ai/sdk, bcryptjs (+13 more)
 
 ### Community 14 - "Approuter / Package.Json"
 Cohesion: 0.10
 Nodes (20): dependencies, @sap/approuter, devDependencies, prettier, vitest, engines, node, prettier (+12 more)
 
 ### Community 15 - "Frontend UI Components"
-Cohesion: 0.12
-Nodes (25): AppNotification, StoredSession, UserRole, ApiKey, ApiKeysCard(), AuthPage(), AutopilotBar(), BusinessObject (+17 more)
+Cohesion: 0.13
+Nodes (18): ApiKey, ApiKeysCard(), AuthPage(), AutopilotBar(), CachePoliciesCard(), CachePolicyRow, WRITE_TOOLS, CommandCenter() (+10 more)
 
 ### Community 16 - "Shared Types"
 Cohesion: 0.11
@@ -308,8 +304,8 @@ Cohesion: 0.12
 Nodes (17): axios, dependencies, axios, @manufacturing-agent/shared, react, react-dom, react-markdown, recharts (+9 more)
 
 ### Community 20 - "Frontend UI Components 2"
-Cohesion: 0.18
-Nodes (10): AGENT_LABEL, AgentGoal, AgentMetrics, AgentRun, AutonomyPage(), Pane, ScenarioResult, STATUS_STYLE (+2 more)
+Cohesion: 0.15
+Nodes (15): App(), AppNotification, loadSession(), StoredSession, UserRole, AGENT_LABEL, AgentGoal, AgentMetrics (+7 more)
 
 ### Community 21 - "Orchestrator / Package.Json 2"
 Cohesion: 0.12
@@ -329,7 +325,7 @@ Nodes (15): compilerOptions, declaration, esModuleInterop, forceConsistentCasing
 
 ### Community 25 - "Orchestrator Common Services 2"
 Cohesion: 0.02
-Nodes (27): a4, aj, aU, bc, Dx(), ej, [f4,d4], fH() (+19 more)
+Nodes (22): a4, aj, aU, bc, ej, [f4,d4], gc, H5 (+14 more)
 
 ### Community 26 - "Readme.Md"
 Cohesion: 0.14
@@ -344,8 +340,8 @@ Cohesion: 0.27
 Nodes (11): getAccessToken(), iflowGet(), logger, TokenState, app, buildServer(), handleGetMaterialDetails(), handleGetStockLevel() (+3 more)
 
 ### Community 29 - "Alerts & Scheduled Reports"
-Cohesion: 0.13
-Nodes (8): AlertsController, Body, Controller, Post, UseGuards, AlertsService, Cron, Injectable
+Cohesion: 0.09
+Nodes (11): Delete, Param, AlertsService, Cron, Injectable, BusinessObjectSummary, ContextConfig, contextualize() (+3 more)
 
 ### Community 30 - "Tsconfig.Base.Json"
 Cohesion: 0.15
@@ -356,40 +352,40 @@ Cohesion: 0.17
 Nodes (11): compilerOptions, baseUrl, jsx, module, moduleResolution, target, extends, include (+3 more)
 
 ### Community 32 - "Chat Agent Loop 2"
-Cohesion: 0.06
-Nodes (61): Ae(), ax(), cA(), Cd(), Cr(), cx(), dm(), dn() (+53 more)
+Cohesion: 0.24
+Nodes (15): ax(), Cd(), dm(), Eh(), HA(), ix(), KA(), kl() (+7 more)
 
 ### Community 33 - "Orchestrator / Tsconfig.Json"
 Cohesion: 0.17
 Nodes (11): compilerOptions, emitDecoratorMetadata, experimentalDecorators, module, moduleResolution, outDir, rootDir, extends (+3 more)
 
 ### Community 34 - "Frontend UI Components 4"
-Cohesion: 0.28
-Nodes (7): ActivityPage(), AuditDetail(), DetailMessage, formatToolResult(), toolList(), EmptyState(), StatusChip()
+Cohesion: 0.32
+Nodes (6): ActivityPage(), AuditDetail(), DetailMessage, formatToolResult(), toolList(), StatusChip()
 
 ### Community 35 - "Frontend UI Components 5"
-Cohesion: 0.12
-Nodes (18): App(), loadSession(), MicButton(), NAV, Sidebar(), Tab, initialsOf(), AdminUser (+10 more)
+Cohesion: 0.21
+Nodes (10): NAV, Sidebar(), Tab, initialsOf(), UserCard(), dict, I18nContext, I18nProvider() (+2 more)
 
 ### Community 36 - "Frontend App Shell"
-Cohesion: 0.17
-Nodes (15): buildDeliveries(), buildGoodsMovements(), buildPurchaseOrderItems(), buildSalesOrders(), CARRIERS, CUSTOMERS, dayOffset(), matchesFilter() (+7 more)
+Cohesion: 0.16
+Nodes (16): Ch(), cw(), cx(), f0(), fx(), Gh(), jl(), lh() (+8 more)
 
 ### Community 37 - "Autonomy Agents (goals, runs, critic, outcomes) 3"
-Cohesion: 0.10
-Nodes (16): AgentGoal, RunStep, Suggestion, ForecastResult, holtForecast(), PARAM_GRID, reorderPoint(), round2() (+8 more)
+Cohesion: 0.36
+Nodes (7): ForecastResult, holtForecast(), PARAM_GRID, reorderPoint(), round2(), runHolt(), toDailySeries()
 
 ### Community 38 - "Orchestrator Src Chat"
-Cohesion: 0.20
-Nodes (10): af(), ew(), Ft(), Nw(), of(), pA(), wo(), xw() (+2 more)
+Cohesion: 0.14
+Nodes (16): af(), ew(), Fa(), Ft(), fw(), gd(), Ih(), Nw() (+8 more)
 
 ### Community 39 - "Frontend UI Components 6"
 Cohesion: 0.25
 Nodes (7): AnalyticsOverview, AnalyticsPage(), TokenRow, Tone, TONE_BAR, TONE_TEXT, toneFor()
 
 ### Community 40 - "Frontend UI Components 7"
-Cohesion: 0.32
-Nodes (7): ApprovalCard(), ApprovalsPage(), DOW, prettyKey(), prettyTool(), ScheduledReport, StockAlert
+Cohesion: 0.16
+Nodes (14): ApprovalCard(), ApprovalsPage(), DOW, prettyKey(), prettyTool(), ScheduledReport, MicButton(), StockAlert (+6 more)
 
 ### Community 41 - "Shared / Tsconfig.Json"
 Cohesion: 0.25
@@ -436,136 +432,144 @@ Cohesion: 0.67
 Nodes (4): Blue Brand Gradient (#2A78D6 to #1B4E94), Factory Silhouette Glyph, FactoryPilot Favicon, Forward Arrow Glyph
 
 ### Community 52 - "Orchestrator / Src / Main.Ts"
-Cohesion: 0.08
-Nodes (15): AuthController, Body, Controller, Delete, Get, Param, Post, UseGuards (+7 more)
+Cohesion: 0.07
+Nodes (18): ConnectedSocket, AuthController, Body, Controller, Delete, Get, Param, Post (+10 more)
 
 ### Community 55 - "Orchestrator / Package.Json 5"
 Cohesion: 0.06
-Nodes (66): _1(), al(), am(), Ba(), bd(), bl(), bw(), Dh() (+58 more)
+Nodes (65): _1(), _6(), al(), am(), Ba(), bd(), bl(), bw() (+57 more)
 
 ### Community 60 - "Orchestrator / Package.Json 7"
-Cohesion: 0.18
-Nodes (10): ei(), Es, ix(), lx(), Rn(), rx, throwIfRequested(), vs() (+2 more)
+Cohesion: 0.20
+Nodes (10): ei(), Es, mi(), Ot(), Rn(), throwIfRequested(), tr(), vs() (+2 more)
 
 ### Community 64 - "Orchestrator / Package.Json 11"
-Cohesion: 0.06
-Nodes (45): Gt(), ar(), Au(), Bn(), clear(), Cn(), co(), Di() (+37 more)
+Cohesion: 0.05
+Nodes (57): Eu(), Gt(), sA(), $u(), ad(), Al(), ar(), Au() (+49 more)
 
 ### Community 82 - "RA"
-Cohesion: 0.19
-Nodes (13): ok(), pr(), createApp(), dataSource(), errorResponse(), logger, moveBodySchema, movementQuerySchema (+5 more)
+Cohesion: 0.14
+Nodes (16): og(), vr(), clear(), Cn(), Cu(), ef(), _f(), get() (+8 more)
 
 ### Community 83 - "ha"
 Cohesion: 0.04
-Nodes (57): Ea(), f3(), fn(), kn, Ks(), aa(), ba(), bm() (+49 more)
+Nodes (45): Ea(), f3(), fn(), Ks(), Un, aa(), ba(), bm() (+37 more)
 
 ### Community 84 - "zg"
 Cohesion: 0.06
-Nodes (63): _4(), a8(), b0(), b4(), C4(), c8(), D4(), d8() (+55 more)
+Nodes (70): _4(), a8(), b(), b0(), b4(), Bu(), C(), C4() (+62 more)
 
 ### Community 85 - ".push"
-Cohesion: 0.06
-Nodes (44): og(), $u(), vr(), ad(), af(), At(), cd, Cu() (+36 more)
+Cohesion: 0.07
+Nodes (44): kn, af(), cd, concat(), ed, en(), ep(), Fe() (+36 more)
 
 ### Community 86 - "Jc"
-Cohesion: 0.05
-Nodes (54): An(), b(), Bu(), by(), C(), C1(), C7(), Cg() (+46 more)
+Cohesion: 0.06
+Nodes (42): An(), by(), C1(), Ds(), ei(), G1(), Gf(), gp() (+34 more)
 
 ### Community 88 - "F"
-Cohesion: 0.11
-Nodes (5): nh(), vK(), wK(), ip(), F
+Cohesion: 0.09
+Nodes (4): nh(), ip(), B(), F
 
 ### Community 89 - "fx"
 Cohesion: 0.07
-Nodes (54): Fa(), Ls(), pl(), Un, wf(), xv(), z7(), ax() (+46 more)
+Nodes (54): Ci(), cn(), Dv, Dx(), Gn(), kd(), Kt(), Lx() (+46 more)
 
 ### Community 90 - "H"
-Cohesion: 0.19
-Nodes (3): Ae(), H, ye()
+Cohesion: 0.12
+Nodes (5): Ae(), H, me(), qe, ye()
 
 ### Community 91 - "ex"
-Cohesion: 0.09
-Nodes (26): A, b3(), bo(), CP(), g3(), gy(), il(), jP() (+18 more)
+Cohesion: 0.21
+Nodes (13): A, CP(), ef(), Fr(), Ju(), jw(), qo(), so() (+5 more)
 
 ### Community 92 - "r"
-Cohesion: 0.10
-Nodes (21): Ai(), dP(), ez(), fp(), gO(), gR(), gz(), HL() (+13 more)
+Cohesion: 0.11
+Nodes (21): Ai(), dP(), ES(), ez(), gO(), gz(), HL(), k3() (+13 more)
 
 ### Community 93 - "realtime-SYmKJpIj.js"
-Cohesion: 0.10
-Nodes (23): Ze(), dd, de(), $e(), Ee(), et, Fe(), G() (+15 more)
+Cohesion: 0.09
+Nodes (19): de(), $e(), Ee(), et, G(), ge(), he(), k() (+11 more)
 
 ### Community 94 - ".query"
-Cohesion: 0.11
-Nodes (12): AdminController, Body, Controller, Delete, Get, Param, Patch, Post (+4 more)
+Cohesion: 0.09
+Nodes (18): AdminController, Body, Controller, Delete, Get, Param, Patch, Post (+10 more)
 
 ### Community 95 - "n"
-Cohesion: 0.13
-Nodes (18): bg(), dj(), Dk(), gg(), jz(), K$(), Ld(), ml() (+10 more)
+Cohesion: 0.14
+Nodes (17): bg(), dj(), Dk(), gg(), jz(), K$(), ml(), n() (+9 more)
 
 ### Community 96 - "vl"
-Cohesion: 0.25
-Nodes (4): WriteLedger, ApiErrorShape, PurchaseRequisition, StockRecord
+Cohesion: 0.19
+Nodes (14): Ae(), em(), Fc(), fm(), hx(), Ni(), pm(), sm() (+6 more)
 
 ### Community 97 - "hf"
-Cohesion: 0.06
-Nodes (43): eE(), Ti(), accessor(), ai(), An(), constructor(), delete(), el() (+35 more)
+Cohesion: 0.09
+Nodes (23): eE(), Ti(), accessor(), ai(), An(), el(), fo, from() (+15 more)
 
 ### Community 98 - "Kn"
-Cohesion: 0.11
-Nodes (27): Al(), ao(), Bo(), Bt(), concat(), cs(), Ct(), Dt() (+19 more)
+Cohesion: 0.14
+Nodes (22): ao(), Bo(), Bt(), cs(), Ct(), Dt(), fs(), ho() (+14 more)
 
 ### Community 99 - "t"
-Cohesion: 0.10
-Nodes (23): _3(), A9(), aT(), cw(), E7(), Eu(), f7(), Fl() (+15 more)
+Cohesion: 0.09
+Nodes (24): _3(), A9(), aT(), Cs(), DF(), E7(), f7(), Fl() (+16 more)
 
 ### Community 100 - "ma"
-Cohesion: 0.33
-Nodes (6): fU(), jo(), sP(), Su(), Uu(), yz()
+Cohesion: 0.22
+Nodes (9): az(), fU(), jo(), ma(), sP(), Su(), Uu(), yz() (+1 more)
 
 ### Community 102 - "i"
 Cohesion: 0.10
 Nodes (23): _0(), ag, bb(), bS(), bT(), c0(), cB(), dU() (+15 more)
 
 ### Community 103 - "jn"
-Cohesion: 0.09
-Nodes (27): jn(), Rh(), bf(), ch(), da(), Eh(), gt, jh() (+19 more)
+Cohesion: 0.11
+Nodes (23): jn(), Rh(), bf(), ch(), da(), Eh(), gt, jh() (+15 more)
 
 ### Community 104 - "ht"
-Cohesion: 0.06
-Nodes (40): AB(), Bi(), clamp(), dO(), Dv, Ev(), f0(), Fe() (+32 more)
+Cohesion: 0.05
+Nodes (44): AB(), Av(), b8(), Bi(), Bv, clamp(), dO(), Ev() (+36 more)
 
 ### Community 105 - "_v"
-Cohesion: 0.15
-Nodes (8): aa(), g7(), TS, _v(), xt(), gn, W, X()
+Cohesion: 0.11
+Nodes (13): aa(), g7(), gV(), qp(), TS, _v(), vK(), wK() (+5 more)
 
 ### Community 106 - "Ft"
-Cohesion: 0.08
-Nodes (31): A1(), ao(), aP(), ar(), Aw(), Ch(), cm(), E1() (+23 more)
+Cohesion: 0.21
+Nodes (12): A1(), ao(), ar(), cm(), E1(), Ed(), ex(), jF() (+4 more)
 
 ### Community 107 - ".get"
-Cohesion: 0.17
-Nodes (3): Be, ne(), Re
+Cohesion: 0.15
+Nodes (4): Be, ne(), Re, xe
 
 ### Community 108 - "lx"
-Cohesion: 0.27
-Nodes (14): acquire(), breaker, fetchLiveMaterial(), fetchLiveOData(), fetchLivePurchaseOrders(), fetchLiveStock(), logger, odataDate() (+6 more)
+Cohesion: 0.23
+Nodes (6): ChatController, Body, Controller, Get, Post, UseGuards
 
 ### Community 109 - "Hs"
-Cohesion: 0.16
-Nodes (22): Bh(), cf(), dA(), en(), hd(), Hs(), hw(), In() (+14 more)
+Cohesion: 0.18
+Nodes (20): Bh(), cf(), dA(), en(), hd(), Hs(), hw(), In() (+12 more)
+
+### Community 110 - "d"
+Cohesion: 0.20
+Nodes (6): MC(), Ie, d, Fe(), se(), Ve()
 
 ### Community 111 - "bl"
-Cohesion: 0.13
-Nodes (16): Av(), az(), b8(), bz(), FS(), hV(), jv(), lO() (+8 more)
+Cohesion: 0.40
+Nodes (5): bz(), FS(), hV(), Pv(), vV()
+
+### Community 112 - "_o"
+Cohesion: 0.28
+Nodes (9): EP(), GA(), Pi(), Qw(), sx(), xP(), yt(), z1() (+1 more)
 
 ### Community 113 - ".get"
-Cohesion: 0.14
-Nodes (16): CT(), E2(), ET(), Fg(), iz(), lm(), Ng(), PK() (+8 more)
+Cohesion: 0.21
+Nodes (11): E2(), ET(), Ng(), PK(), Q2(), xj(), XO(), Xu() (+3 more)
 
 ### Community 114 - "ChatController"
-Cohesion: 0.22
-Nodes (10): a3(), bF(), Ec, i3(), mp(), n3(), _o(), Xf() (+2 more)
+Cohesion: 0.21
+Nodes (12): a3(), bF(), Ec, i3(), mp(), n3(), _o(), wf() (+4 more)
 
 ### Community 115 - "rgb"
 Cohesion: 0.18
@@ -576,20 +580,24 @@ Cohesion: 0.29
 Nodes (8): B6(), j6(), k6(), L6(), M6(), R6(), rU(), Zn()
 
 ### Community 117 - ".has"
-Cohesion: 0.25
-Nodes (9): cn(), bl(), Jn(), _l(), Ml(), ol(), ql(), Ul() (+1 more)
+Cohesion: 0.29
+Nodes (8): Aw(), Cr(), iu(), qA(), rr(), ux(), _w(), Ya()
+
+### Community 118 - "zx"
+Cohesion: 0.18
+Nodes (5): fj(), hj(), Ri(), Uj(), zx
 
 ### Community 120 - "Qu"
-Cohesion: 0.22
-Nodes (9): dw(), nz, oh(), Q_(), Qu(), Rc(), wu(), Y_() (+1 more)
+Cohesion: 0.25
+Nodes (8): dw(), nz, oh(), Q_(), Qu(), Rc(), wu(), Y_()
 
 ### Community 121 - "b7"
-Cohesion: 0.33
-Nodes (6): A7(), b7(), O7(), S7(), w7(), x7()
+Cohesion: 0.22
+Nodes (9): A7(), b7(), Je(), O7(), q7(), S7(), w7(), x7() (+1 more)
 
 ### Community 122 - "tt"
-Cohesion: 0.33
-Nodes (6): C5(), Le(), T5(), tt(), z0(), zo()
+Cohesion: 0.22
+Nodes (9): C5(), e6(), j5(), k5(), Le(), T5(), tt(), z0() (+1 more)
 
 ### Community 123 - "Kf"
 Cohesion: 0.29
@@ -600,12 +608,16 @@ Cohesion: 0.33
 Nodes (5): After this wave, FactoryPilot Roadmap — Phases U–W (Business Object coverage), Phase U — Business Object Registry + generic query path, Phase V — The five business objects + contextualization rules, Phase W — Live SAP via Business Accelerator Hub OData
 
 ### Community 125 - "rU"
-Cohesion: 0.53
-Nodes (6): Hn(), Hr(), Io(), lr(), Me(), yO()
+Cohesion: 0.21
+Nodes (12): Hn(), Hr(), Io(), Jt(), lr(), Me(), yO(), Gr() (+4 more)
 
 ### Community 126 - "cv"
 Cohesion: 0.29
 Nodes (7): a0(), cv(), Mo(), o0(), rz, VN(), WS()
+
+### Community 128 - "W"
+Cohesion: 0.16
+Nodes (12): fH(), Ld(), Ze(), _c, dd, ia(), kc(), nd() (+4 more)
 
 ### Community 129 - "FactoryPilot Roadmap — Phases S–V (agentic depth wave)"
 Cohesion: 0.29
@@ -624,20 +636,24 @@ Cohesion: 0.40
 Nodes (5): _9(), C9(), j9(), qi(), T9()
 
 ### Community 133 - "i6"
-Cohesion: 0.67
-Nodes (3): G5(), q5(), X5()
+Cohesion: 0.40
+Nodes (6): G5(), i6(), n6(), q5(), X5(), un()
+
+### Community 134 - "Bi"
+Cohesion: 0.40
+Nodes (6): b3(), g3(), m3(), PS(), x3(), zi()
 
 ### Community 135 - "yB"
 Cohesion: 0.40
 Nodes (5): aK(), iK(), np(), xB(), yB()
 
 ### Community 136 - "y8"
-Cohesion: 0.40
-Nodes (5): Bv, Lv, Nv, vu, y8()
+Cohesion: 0.33
+Nodes (5): CT(), Fg(), lm(), rv(), x2()
 
 ### Community 137 - "Ds"
-Cohesion: 0.40
-Nodes (5): Kt(), Wa(), XO(), Xu(), YU()
+Cohesion: 0.33
+Nodes (6): fp(), iz(), kz(), mz(), qB(), Wg()
 
 ### Community 138 - "v0"
 Cohesion: 0.50
@@ -648,12 +664,12 @@ Cohesion: 0.50
 Nodes (4): Ad(), Dd(), Nd(), id()
 
 ### Community 140 - "w9"
-Cohesion: 0.40
-Nodes (5): d3(), ES(), k3(), mg(), p3()
+Cohesion: 0.67
+Nodes (3): d3(), mg(), p3()
 
 ### Community 141 - "UB"
-Cohesion: 0.50
-Nodes (4): b9(), tB(), w9(), x9()
+Cohesion: 0.18
+Nodes (9): b9(), gR(), nU(), tB(), w9(), x8(), x9(), gc (+1 more)
 
 ### Community 142 - "Fz"
 Cohesion: 0.50
@@ -699,44 +715,44 @@ Nodes (4): Dy(), lw(), Oa(), vP()
 Cohesion: 0.33
 Nodes (5): Deliberate deviations from the spec (kept, with rationale), Spec Gap Analysis — PO Technical Design vs FactoryPilot, Status after the Phase T spec-alignment wave, Still open (the "missing" item, next phase), Verdict
 
+### Community 169 - "bcryptjs"
+Cohesion: 0.40
+Nodes (5): aP(), iP(), oP(), PP(), sh()
+
 ### Community 170 - "qi"
 Cohesion: 0.50
 Nodes (4): e9(), kb(), qV(), yV()
+
+### Community 171 - "xy"
+Cohesion: 0.40
+Nodes (5): bo(), il(), or(), qy(), xy()
+
+### Community 172 - "Pv"
+Cohesion: 0.40
+Nodes (4): BusinessObject, BusinessObjectsCard(), EMPTY, ObjectEditor()
 
 ### Community 174 - "e9"
 Cohesion: 0.67
 Nodes (3): AppModule, Module, bootstrap()
 
-### Community 175 - "Ri"
-Cohesion: 0.50
-Nodes (4): fj(), hj(), Ri(), Uj()
-
-### Community 176 - "gh"
-Cohesion: 0.67
-Nodes (3): e6(), j5(), k5()
-
-### Community 177 - "fp"
-Cohesion: 0.67
-Nodes (3): gV(), qp(), wa()
-
-### Community 178 - "i6"
-Cohesion: 1.00
-Nodes (3): i6(), n6(), un()
+### Community 179 - "Iw"
+Cohesion: 0.23
+Nodes (12): B1(), cA(), Iw(), mw(), nn(), ot(), rl(), Rw() (+4 more)
 
 ## Knowledge Gaps
-- **496 isolated node(s):** `name`, `version`, `private`, `node`, `dev` (+491 more)
+- **498 isolated node(s):** `name`, `version`, `private`, `node`, `dev` (+493 more)
   These have ≤1 connection - possible missing edges or undocumented components.
-- **53 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
+- **44 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
-- **Why does `b()` connect `Jc` to `Chat Agent Loop 2`, `hf`, `LLM Provider Layer`, `t`, `_`, `i`, `_v`, `Auth, API Keys & Session Layer 2`, `.get`, `rgb`, `zg`, `Orchestrator Common Services 2`, `r`, `realtime-SYmKJpIj.js`, `n`?**
+- **Why does `b()` connect `zg` to `W`, `LLM Provider Layer`, `t`, `_`, `i`, `y8`, `_v`, `Auth, API Keys & Session Layer 2`, `_o`, `rgb`, `Jc`, `Orchestrator Common Services 2`, `r`, `rU`, `n`?**
   _High betweenness centrality (0.236) - this node is a cross-community bridge._
-- **Why does `rankByOutcome()` connect `LLM Provider Layer` to `Jc`?**
+- **Why does `rankByOutcome()` connect `LLM Provider Layer` to `zg`?**
   _High betweenness centrality (0.232) - this node is a cross-community bridge._
-- **Why does `AuthUser` connect `Autonomy Agents (goals, runs, critic, outcomes) 2` to `Autonomy Agents (goals, runs, critic, outcomes)`, `Chat Agent Loop`, `Auth, API Keys & Session Layer`, `Orchestrator Common Services`, `Orchestrator / Src / Main.Ts`, `Alerts & Scheduled Reports`, `.query`?**
-  _High betweenness centrality (0.076) - this node is a cross-community bridge._
+- **Why does `AuthUser` connect `Autonomy Agents (goals, runs, critic, outcomes) 2` to `Chat Agent Loop`, `Orchestrator Common Services`, `lx`, `Orchestrator / Src / Main.Ts`, `Alerts & Scheduled Reports`, `.query`?**
+  _High betweenness centrality (0.057) - this node is a cross-community bridge._
 - **Are the 120 inferred relationships involving `t()` (e.g. with `charts-C2dOeYOM.js` and `Ai()`) actually correct?**
   _`t()` has 120 INFERRED edges - model-reasoned connections that need verification._
 - **Are the 144 inferred relationships involving `n()` (e.g. with `charts-C2dOeYOM.js` and `_9()`) actually correct?**

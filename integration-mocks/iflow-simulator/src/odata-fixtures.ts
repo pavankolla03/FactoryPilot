@@ -133,6 +133,11 @@ function matchesFilter(row: Row, filter?: string): boolean {
     }
     const field = m[1];
     let value = m[2].trim();
+    // OData v2 date literal: datetime'2026-07-21T00:00:00' — compare on the date part.
+    const dt = /^datetime'([^']+)'$/i.exec(value);
+    if (dt) {
+      return String(row[field] ?? '').slice(0, 10) === dt[1].slice(0, 10);
+    }
     if (value.startsWith("'") && value.endsWith("'")) {
       value = value.slice(1, -1).replace(/''/g, "'");
     }

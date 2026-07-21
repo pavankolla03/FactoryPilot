@@ -3,6 +3,7 @@ import { DbService } from '../common/db.service';
 import type { AuthUser } from '../common/types';
 import { validationError } from '../common/errors';
 import { contextualize, type BusinessObjectSummary } from './business-object-context';
+import { SapIflowClient } from './sap-iflow.client';
 
 export interface BusinessObjectRow {
   id: string;
@@ -49,7 +50,7 @@ export interface BusinessObjectInput {
 @Injectable()
 export class BusinessObjectsService {
   private readonly logger = new Logger(BusinessObjectsService.name);
-  private readonly iflowBase = (process.env.IFLOW_BASE_URL || 'http://localhost:4000').replace(/\/$/, '');
+  private readonly iflow = new SapIflowClient();
 
   constructor(private readonly db: DbService) {}
 
@@ -173,28 +174,18 @@ export class BusinessObjectsService {
     return res.rows[0] ?? null;
   }
 
-  /** Ping $metadata through the iFlow to validate config before activation. */
+  /** Ping the object's entity set through the iFlow (or simulator) to validate config. */
   async testConnection(user: AuthUser, id: string): Promise<{ ok: boolean; mode: string; message: string }> {
     const row = await this.byId(user, id);
     if (!row) {
       validationError('business object not found');
     }
-    const url = new URL(`${this.iflowBase}/iflow/odata/metadata`);
-    url.searchParams.set('service', row!.odata_service_path);
-    url.searchParams.set('entitySet', row!.entity_set);
-    try {
-      const res = await fetch(url);
-      const body = (await res.json()) as { ok?: boolean; mode?: string; message?: string };
-      return {
-        ok: Boolean(body.ok),
-        mode: body.mode ?? 'unknown',
-        message: body.ok
-          ? `Reachable (${body.mode}) — ${row!.entity_set} on ${row!.odata_service_path}`
-          : `Not reachable (${body.mode ?? 'error'}) — check the service path and entity set`,
-      };
-    } catch (error) {
-      return { ok: false, mode: 'error', message: error instanceof Error ? error.message : 'connection failed' };
-    }
+    return this.iflow.testConnection(row!.odata_service_path, row!.entity_set);
+  }
+
+  /** Format a date-equality clause per OData version (v2 needs a datetime literal). */
+  private dateEq(field: string, isoDate: string, apiVersion: string): string {
+    return apiVersion === 'v4' ? `${field} eq ${isoDate}` : `${field} eq datetime'${isoDate}T00:00:00'`;
   }
 
   /** Build the OData filter from config template + runtime args, then query. */
@@ -229,27 +220,25 @@ export class BusinessObjectsService {
     }
     if (args.todayOnly && cfg.date_field) {
       const today = new Date().toISOString().slice(0, 10);
-      clauses.push(`${cfg.date_field} eq '${today}'`);
+      clauses.push(this.dateEq(cfg.date_field, today, cfg.api_version));
     }
 
-    const url = new URL(`${this.iflowBase}/iflow/odata`);
-    url.searchParams.set('service', cfg.odata_service_path);
-    url.searchParams.set('entitySet', cfg.entity_set);
-    if (clauses.length) {
-      url.searchParams.set('filter', clauses.join(' and '));
+    let result: Awaited<ReturnType<SapIflowClient['query']>>;
+    try {
+      result = await this.iflow.query({
+        service: cfg.odata_service_path,
+        entitySet: cfg.entity_set,
+        filter: clauses.length ? clauses.join(' and ') : undefined,
+        select: cfg.select_fields || undefined,
+        top: Math.min(args.top || cfg.top_limit, 200),
+        objectCode: cfg.object_code,
+        warehouseId: args.warehouseId,
+        todayOnly: args.todayOnly,
+      });
+    } catch (error) {
+      validationError(error instanceof Error ? error.message : 'business object query failed');
     }
-    if (cfg.select_fields) {
-      url.searchParams.set('select', cfg.select_fields);
-    }
-    url.searchParams.set('top', String(Math.min(args.top || cfg.top_limit, 200)));
-
-    const res = await fetch(url);
-    if (!res.ok) {
-      const body = (await res.json().catch(() => ({}))) as { error?: { message?: string } };
-      validationError(body.error?.message || `business object query failed (${res.status})`);
-    }
-    const body = (await res.json()) as { records?: Array<Record<string, unknown>>; dataSource?: string };
-    const records = body.records ?? [];
+    const records = result!.records;
     const summary = contextualize(records, {
       objectName: cfg.object_name,
       statusField: cfg.status_field,
@@ -260,7 +249,7 @@ export class BusinessObjectsService {
     return {
       objectCode: cfg.object_code,
       objectName: cfg.object_name,
-      dataSource: body.dataSource ?? 'simulator',
+      dataSource: result!.dataSource,
       summary,
       records,
     };

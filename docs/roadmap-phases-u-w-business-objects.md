@@ -25,7 +25,7 @@ Coverage map to the documents:
 | Component 6 — Logging & audit | ✅ Phase T |
 | Component 7 — Monitoring dashboard | ✅ Phase T |
 | LLM gateway (OpenRouter) | ✅ shipped |
-| Live S/4 via Business Accelerator Hub OData | **Phase W** (plumbing wired — activates with `SAP_API_KEY`) |
+| Live S/4 via Business Accelerator Hub OData | ✅ Phase W (external-iFlow connector — set `SAP_IFLOW_URL` + auth; see `sap-iflow-contract.md`) |
 
 ---
 
