@@ -1,7 +1,7 @@
 {
   ".claude/settings.local.json": {
-    "mtime": 1784654173.0788264,
-    "ast_hash": "844be4f0dbdd22e4ed2e7d84a2537706",
+    "mtime": 1784654910.1070368,
+    "ast_hash": "33fb5cdaaa93d664ce314424d837b713",
     "semantic_hash": ""
   },
   ".eslintrc.cjs": {
@@ -60,8 +60,8 @@
     "semantic_hash": "f730ac257d2fe94a3bf5912a00ae69c6"
   },
   "frontend/src/App.tsx": {
-    "mtime": 1784653929.9525104,
-    "ast_hash": "c96d9ce02e9aca5abef32a868e7a13c7",
+    "mtime": 1784654542.6990867,
+    "ast_hash": "9922c3267cc7a12bed93d12221175996",
     "semantic_hash": ""
   },
   "frontend/src/components/ActivityPage.tsx": {
@@ -170,9 +170,9 @@
     "semantic_hash": "c71c9faa5c06a385ad0716599deda06c"
   },
   "integration-mocks/iflow-simulator/fixtures/movements.json": {
-    "mtime": 1784495068.335365,
-    "ast_hash": "7fed41335479f08db758132b1deea5a1",
-    "semantic_hash": "7fed41335479f08db758132b1deea5a1"
+    "mtime": 1784654788.0717084,
+    "ast_hash": "3e8c9e80ed0dd4c4616180e1a1cdd8e0",
+    "semantic_hash": ""
   },
   "integration-mocks/iflow-simulator/fixtures/purchase-orders.json": {
     "mtime": 1784169568.5305676,
@@ -310,8 +310,8 @@
     "semantic_hash": "cca3d789b9e10c2089cd18fb82907b5d"
   },
   "orchestrator/src/app.module.ts": {
-    "mtime": 1784653801.6740494,
-    "ast_hash": "e37c7455f484c8c225e414d117284a7a",
+    "mtime": 1784654431.4245975,
+    "ast_hash": "92973272a3b7214af538451f30dfd059",
     "semantic_hash": ""
   },
   "orchestrator/src/auth/auth.controller.ts": {
@@ -340,8 +340,8 @@
     "semantic_hash": "667be8a4271ff5beaad188b98e915985"
   },
   "orchestrator/src/chat/agent-loop.test.ts": {
-    "mtime": 1784653877.4952583,
-    "ast_hash": "fced6d1fb7c147728158a763ccfa944f",
+    "mtime": 1784654487.0523098,
+    "ast_hash": "e7a89c6076711bc4dc03dd868d85ab35",
     "semantic_hash": ""
   },
   "orchestrator/src/chat/chat.controller.ts": {
@@ -355,8 +355,8 @@
     "semantic_hash": "e3fa6cda2492cf47bc71bee389ef526f"
   },
   "orchestrator/src/chat/chat.service.ts": {
-    "mtime": 1784653833.5798175,
-    "ast_hash": "84e508449f741bd80569ec83c857f8b7",
+    "mtime": 1784654460.324995,
+    "ast_hash": "6d0dc79de96caba8aa3ffc150113c475",
     "semantic_hash": ""
   },
   "orchestrator/src/chat/confirm-action-idempotency.test.ts": {
@@ -717,6 +717,21 @@
   "orchestrator/src/suppliers/suppliers.service.ts": {
     "mtime": 1784654023.4567492,
     "ast_hash": "966003869c3e6ea4edc5667e99ada9f5",
+    "semantic_hash": ""
+  },
+  "frontend/src/components/SlottingCard.tsx": {
+    "mtime": 1784654527.0516214,
+    "ast_hash": "a0ba6630bcdf12e6b8415eb9a8fc7b1a",
+    "semantic_hash": ""
+  },
+  "orchestrator/src/slotting/slotting.controller.ts": {
+    "mtime": 1784654406.848951,
+    "ast_hash": "5b78d20675bdc9bb4c3f0612598f4767",
+    "semantic_hash": ""
+  },
+  "orchestrator/src/slotting/slotting.service.ts": {
+    "mtime": 1784654754.1407602,
+    "ast_hash": "daa9cceda23da5b1cdb37844f398c3c1",
     "semantic_hash": ""
   }
 }

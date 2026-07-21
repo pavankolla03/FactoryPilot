@@ -16,6 +16,7 @@ import { AgentsService } from '../agents/agents.service';
 import { BusinessObjectsService } from '../business-objects/business-objects.service';
 import { HealthService } from '../health/health.service';
 import { SuppliersService } from '../suppliers/suppliers.service';
+import { SlottingService } from '../slotting/slotting.service';
 import { hydrateModelOutcomes, reportModelOutcome } from '../llm/openrouter-provider';
 import { openSecret } from '../common/secret-box';
 import type { UserModelConfig } from '../llm/custom-provider';
@@ -155,6 +156,16 @@ const LOCAL_TOOLS = [
     },
   },
   {
+    name: 'suggestSlotting',
+    description:
+      'Analyze pick frequency (7 days of movements) for a warehouse and propose bin relocations: fast-moving materials sitting in reserve locations (bulk/receiving) that should move to a forward pick face (packing/shipping) for a shorter pick path. Use for "how can we optimize slotting/picking?", "which materials are in the wrong location?", "reduce picker walking". Returns ranked relocation proposals with rationale; each can be executed as a governed move.',
+    inputSchema: {
+      type: 'object',
+      properties: { warehouseId: { type: 'string' } },
+      required: ['warehouseId'],
+    },
+  },
+  {
     name: 'getSupplierScorecards',
     description:
       'Get supplier reliability scorecards ranked worst-first: on-time delivery rate, lead time (declared and measured from PO history), open and overdue purchase orders, quantity on order, and a 0-100 reliability score. Use for questions about suppliers/vendors — "which supplier is our biggest risk?", "who has the worst on-time rate or longest lead time?", "which supplier has overdue POs?". Takes no arguments; returns all suppliers in scope.',
@@ -203,6 +214,7 @@ export class ChatService {
     private readonly businessObjects: BusinessObjectsService,
     private readonly health: HealthService,
     private readonly suppliers: SuppliersService,
+    private readonly slotting: SlottingService,
   ) {}
 
   async getUsage(userId: string) {
@@ -1169,6 +1181,19 @@ export class ChatService {
             materialId: a.material_id,
             threshold: a.threshold,
           })),
+        },
+      };
+    }
+
+    if (name === 'suggestSlotting') {
+      const warehouseId = String(args.warehouseId || '');
+      this.assertScope(user, warehouseId, 'read');
+      const result = await this.slotting.proposals(warehouseId);
+      return {
+        structuredContent: {
+          ...result,
+          count: result.proposals.length,
+          note: 'Each proposal is a governed move — use moveStock (or the operations board) to execute it with approval.',
         },
       };
     }

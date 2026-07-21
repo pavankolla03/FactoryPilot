@@ -1,7 +1,7 @@
 {
   ".claude/settings.local.json": {
-    "mtime": 1784653102.2239325,
-    "ast_hash": "37fd42e9ccc010c4f3cebc35a441a89f",
+    "mtime": 1784654173.0788264,
+    "ast_hash": "844be4f0dbdd22e4ed2e7d84a2537706",
     "semantic_hash": ""
   },
   ".eslintrc.cjs": {
@@ -60,8 +60,8 @@
     "semantic_hash": "f730ac257d2fe94a3bf5912a00ae69c6"
   },
   "frontend/src/App.tsx": {
-    "mtime": 1784652984.0637689,
-    "ast_hash": "ae7e49682fbff0ef573a1e690a79e180",
+    "mtime": 1784653929.9525104,
+    "ast_hash": "c96d9ce02e9aca5abef32a868e7a13c7",
     "semantic_hash": ""
   },
   "frontend/src/components/ActivityPage.tsx": {
@@ -310,8 +310,8 @@
     "semantic_hash": "cca3d789b9e10c2089cd18fb82907b5d"
   },
   "orchestrator/src/app.module.ts": {
-    "mtime": 1784652848.423241,
-    "ast_hash": "90552d605dfd9d4aed653aa8ff81d2d0",
+    "mtime": 1784653801.6740494,
+    "ast_hash": "e37c7455f484c8c225e414d117284a7a",
     "semantic_hash": ""
   },
   "orchestrator/src/auth/auth.controller.ts": {
@@ -340,8 +340,8 @@
     "semantic_hash": "667be8a4271ff5beaad188b98e915985"
   },
   "orchestrator/src/chat/agent-loop.test.ts": {
-    "mtime": 1784652910.7568617,
-    "ast_hash": "8aa1b694ba43a0ca5998ef2490981f03",
+    "mtime": 1784653877.4952583,
+    "ast_hash": "fced6d1fb7c147728158a763ccfa944f",
     "semantic_hash": ""
   },
   "orchestrator/src/chat/chat.controller.ts": {
@@ -355,8 +355,8 @@
     "semantic_hash": "e3fa6cda2492cf47bc71bee389ef526f"
   },
   "orchestrator/src/chat/chat.service.ts": {
-    "mtime": 1784652882.2242484,
-    "ast_hash": "852572160b996c3919a3d48b4d14709a",
+    "mtime": 1784653833.5798175,
+    "ast_hash": "84e508449f741bd80569ec83c857f8b7",
     "semantic_hash": ""
   },
   "orchestrator/src/chat/confirm-action-idempotency.test.ts": {
@@ -590,9 +590,9 @@
     "semantic_hash": "9f030ca630041fa7c2e9f08aa42a5632"
   },
   "integration-mocks/iflow-simulator/fixtures/suppliers.json": {
-    "mtime": 1784494900.2842853,
-    "ast_hash": "9515f83220bb9be3a4307e8df955d3d4",
-    "semantic_hash": "9515f83220bb9be3a4307e8df955d3d4"
+    "mtime": 1784653723.5603454,
+    "ast_hash": "684d57d7aacfe77edc46e8a4c8f8ef46",
+    "semantic_hash": ""
   },
   "orchestrator/src/agents/forecast.test.ts": {
     "mtime": 1784495255.1868227,
@@ -702,6 +702,21 @@
   "orchestrator/src/health/health.service.ts": {
     "mtime": 1784652811.6702054,
     "ast_hash": "492c926d9a034870225f9ea61a2b5df0",
+    "semantic_hash": ""
+  },
+  "frontend/src/components/SuppliersCard.tsx": {
+    "mtime": 1784654266.7393124,
+    "ast_hash": "547b7090ae8549429d0edf026796c317",
+    "semantic_hash": ""
+  },
+  "orchestrator/src/suppliers/suppliers.controller.ts": {
+    "mtime": 1784653777.58286,
+    "ast_hash": "b19bd8c30d0aa3a30abd43b3c1dee408",
+    "semantic_hash": ""
+  },
+  "orchestrator/src/suppliers/suppliers.service.ts": {
+    "mtime": 1784654023.4567492,
+    "ast_hash": "966003869c3e6ea4edc5667e99ada9f5",
     "semantic_hash": ""
   }
 }

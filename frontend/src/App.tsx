@@ -26,6 +26,7 @@ import { CachePoliciesCard } from './components/CachePoliciesCard';
 import { BusinessObjectsCard } from './components/BusinessObjectsCard';
 import { WarehouseHealthCard } from './components/WarehouseHealthCard';
 import { SuppliersCard } from './components/SuppliersCard';
+import { SlottingCard } from './components/SlottingCard';
 import { AnalyticsPage, type AnalyticsOverview } from './components/AnalyticsPage';
 import { Icon, PageHeader, paths } from './components/ui';
 import { useI18n } from './i18n';
@@ -618,6 +619,16 @@ function App() {
                 setTab('chat');
                 void sendChat(
                   'Which supplier is our biggest reliability risk right now, and why? Consider on-time rate, lead time and any overdue POs.',
+                );
+              }}
+            />
+            <SlottingCard
+              client={client}
+              onToast={showToast}
+              onExplain={(wh) => {
+                setTab('chat');
+                void sendChat(
+                  `Analyze slotting for warehouse ${wh}: which fast-moving materials are in the wrong location and how should we reslot them to cut picker walking?`,
                 );
               }}
             />
