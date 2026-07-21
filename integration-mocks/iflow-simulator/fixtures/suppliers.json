@@ -10,6 +10,60 @@
   },
   {
     "supplierId": "SUP-10002",
+    "name": "CuTech Windings Ltd",
+    "city": "Sheffield",
+    "country": "GB",
+    "leadTimeDays": 14,
+    "onTimeRatePct": 71,
+    "contact": "sales@cutech-windings.example"
+  },
+  {
+    "supplierId": "SUP-10003",
+    "name": "SKF Distribution",
+    "city": "Göteborg",
+    "country": "SE",
+    "leadTimeDays": 7,
+    "onTimeRatePct": 96,
+    "contact": "dispatch@skf-distribution.example"
+  },
+  {
+    "supplierId": "SUP-10004",
+    "name": "Bracket & Frame Co",
+    "city": "Birmingham",
+    "country": "GB",
+    "leadTimeDays": 9,
+    "onTimeRatePct": 84,
+    "contact": "orders@bracketframe.example"
+  },
+  {
+    "supplierId": "SUP-10005",
+    "name": "CircuitWorks Asia",
+    "city": "Shenzhen",
+    "country": "CN",
+    "leadTimeDays": 21,
+    "onTimeRatePct": 68,
+    "contact": "export@circuitworks-asia.example"
+  },
+  {
+    "supplierId": "SUP-10006",
+    "name": "ShaftPro Machining",
+    "city": "Stuttgart",
+    "country": "DE",
+    "leadTimeDays": 8,
+    "onTimeRatePct": 90,
+    "contact": "orders@shaftpro.example"
+  },
+  {
+    "supplierId": "SUP-10007",
+    "name": "MotorCore Industries",
+    "city": "Lyon",
+    "country": "FR",
+    "leadTimeDays": 12,
+    "onTimeRatePct": 79,
+    "contact": "sales@motorcore.example"
+  },
+  {
+    "supplierId": "SUP-10008",
     "name": "Precision Jig Works",
     "city": "Brno",
     "country": "CZ",
@@ -18,21 +72,21 @@
     "contact": "sales@precisionjig.example"
   },
   {
-    "supplierId": "SUP-10003",
-    "name": "Nordbolt Fasteners AB",
-    "city": "Göteborg",
-    "country": "SE",
+    "supplierId": "SUP-10009",
+    "name": "BoltMaster Supply",
+    "city": "Rotterdam",
+    "country": "NL",
     "leadTimeDays": 6,
-    "onTimeRatePct": 97,
-    "contact": "dispatch@nordbolt.example"
+    "onTimeRatePct": 94,
+    "contact": "orders@boltmaster.example"
   },
   {
-    "supplierId": "SUP-10004",
-    "name": "Adriatic Polymers d.o.o.",
-    "city": "Rijeka",
-    "country": "HR",
-    "leadTimeDays": 14,
-    "onTimeRatePct": 85,
-    "contact": "export@adriaticpolymers.example"
+    "supplierId": "SUP-10010",
+    "name": "Airflow Components",
+    "city": "Milano",
+    "country": "IT",
+    "leadTimeDays": 16,
+    "onTimeRatePct": 73,
+    "contact": "export@airflow-components.example"
   }
 ]

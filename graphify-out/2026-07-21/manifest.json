@@ -1,7 +1,7 @@
 {
   ".claude/settings.local.json": {
-    "mtime": 1784649396.326987,
-    "ast_hash": "1b12146c543e58dc08f180b73009995e",
+    "mtime": 1784653102.2239325,
+    "ast_hash": "37fd42e9ccc010c4f3cebc35a441a89f",
     "semantic_hash": ""
   },
   ".eslintrc.cjs": {
@@ -60,8 +60,8 @@
     "semantic_hash": "f730ac257d2fe94a3bf5912a00ae69c6"
   },
   "frontend/src/App.tsx": {
-    "mtime": 1784627963.697137,
-    "ast_hash": "b5cf6aebc2d0bd8ab03abd4ac3212974",
+    "mtime": 1784652984.0637689,
+    "ast_hash": "ae7e49682fbff0ef573a1e690a79e180",
     "semantic_hash": ""
   },
   "frontend/src/components/ActivityPage.tsx": {
@@ -155,8 +155,8 @@
     "semantic_hash": "fdd6d3fd2f4b4aacc15893c50b72bfe2"
   },
   "infra/db/schema.sql": {
-    "mtime": 1784631440.6777809,
-    "ast_hash": "2eb9541587d0a3abc5b45c012163dd5e",
+    "mtime": 1784652767.2571514,
+    "ast_hash": "2ee840969f2447779eb4f7bb6beaddba",
     "semantic_hash": ""
   },
   "infra/xsuaa-security.json": {
@@ -310,8 +310,8 @@
     "semantic_hash": "cca3d789b9e10c2089cd18fb82907b5d"
   },
   "orchestrator/src/app.module.ts": {
-    "mtime": 1784626808.3538332,
-    "ast_hash": "d102795d0c8dc5856d1cd409bb28ce67",
+    "mtime": 1784652848.423241,
+    "ast_hash": "90552d605dfd9d4aed653aa8ff81d2d0",
     "semantic_hash": ""
   },
   "orchestrator/src/auth/auth.controller.ts": {
@@ -340,8 +340,8 @@
     "semantic_hash": "667be8a4271ff5beaad188b98e915985"
   },
   "orchestrator/src/chat/agent-loop.test.ts": {
-    "mtime": 1784626967.5087078,
-    "ast_hash": "05cd6382c5a0123be33b1a9d3e9cd67c",
+    "mtime": 1784652910.7568617,
+    "ast_hash": "8aa1b694ba43a0ca5998ef2490981f03",
     "semantic_hash": ""
   },
   "orchestrator/src/chat/chat.controller.ts": {
@@ -355,8 +355,8 @@
     "semantic_hash": "e3fa6cda2492cf47bc71bee389ef526f"
   },
   "orchestrator/src/chat/chat.service.ts": {
-    "mtime": 1784631798.8286755,
-    "ast_hash": "40a9a87381df8067e74190f61622d288",
+    "mtime": 1784652882.2242484,
+    "ast_hash": "852572160b996c3919a3d48b4d14709a",
     "semantic_hash": ""
   },
   "orchestrator/src/chat/confirm-action-idempotency.test.ts": {
@@ -682,6 +682,26 @@
   "docs/sap-iflow-contract.md": {
     "mtime": 1784645770.0057938,
     "ast_hash": "5f2da341276154238808a97a67c44af7",
+    "semantic_hash": ""
+  },
+  ".claude/launch.json": {
+    "mtime": 1784651314.800567,
+    "ast_hash": "29d063b6c268f3e0c5e9a878b124ac63",
+    "semantic_hash": ""
+  },
+  "frontend/src/components/WarehouseHealthCard.tsx": {
+    "mtime": 1784652964.3103104,
+    "ast_hash": "be6d6b3000b00cb4ca304920e2bc7207",
+    "semantic_hash": ""
+  },
+  "orchestrator/src/health/health.controller.ts": {
+    "mtime": 1784652827.1562598,
+    "ast_hash": "b56fbaef1322d542a1433fd27cdfa931",
+    "semantic_hash": ""
+  },
+  "orchestrator/src/health/health.service.ts": {
+    "mtime": 1784652811.6702054,
+    "ast_hash": "492c926d9a034870225f9ea61a2b5df0",
     "semantic_hash": ""
   }
 }

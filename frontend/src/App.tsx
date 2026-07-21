@@ -25,6 +25,7 @@ import { UsersPage, type AdminUser, type WarehousePolicy } from './components/Us
 import { CachePoliciesCard } from './components/CachePoliciesCard';
 import { BusinessObjectsCard } from './components/BusinessObjectsCard';
 import { WarehouseHealthCard } from './components/WarehouseHealthCard';
+import { SuppliersCard } from './components/SuppliersCard';
 import { AnalyticsPage, type AnalyticsOverview } from './components/AnalyticsPage';
 import { Icon, PageHeader, paths } from './components/ui';
 import { useI18n } from './i18n';
@@ -608,6 +609,15 @@ function App() {
                 setTab('chat');
                 void sendChat(
                   `Explain the health score for warehouse ${wh}: what is the biggest risk driving it down, and what should I do about it?`,
+                );
+              }}
+            />
+            <SuppliersCard
+              client={client}
+              onExplain={() => {
+                setTab('chat');
+                void sendChat(
+                  'Which supplier is our biggest reliability risk right now, and why? Consider on-time rate, lead time and any overdue POs.',
                 );
               }}
             />

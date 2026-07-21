@@ -11,6 +11,7 @@ import type { AlertsService } from '../alerts/alerts.service';
 import type { AgentsService } from '../agents/agents.service';
 import type { BusinessObjectsService } from '../business-objects/business-objects.service';
 import type { HealthService } from '../health/health.service';
+import type { SuppliersService } from '../suppliers/suppliers.service';
 import type { AuthUser } from '../common/types';
 
 interface StoredMessage {
@@ -153,6 +154,11 @@ function buildFakes() {
     overview: async () => [],
   } as unknown as HealthService;
 
+  const suppliers = {
+    scorecards: async () => [],
+    leadTimeFor: async () => null,
+  } as unknown as SuppliersService;
+
   return {
     db,
     redis,
@@ -164,6 +170,7 @@ function buildFakes() {
     agentsSvc,
     businessObjects,
     health,
+    suppliers,
     providerRounds,
     sessionLogs,
     messages,
@@ -192,6 +199,7 @@ describe('agent loop', () => {
       fakes.agentsSvc,
       fakes.businessObjects,
       fakes.health,
+      fakes.suppliers,
     );
 
     const response = await service.chat(user, undefined, 'how much MAT-1 in 1010?');
@@ -225,6 +233,7 @@ describe('agent loop', () => {
       fakes.agentsSvc,
       fakes.businessObjects,
       fakes.health,
+      fakes.suppliers,
     );
 
     await service.chat(user, undefined, 'how much MAT-1 in 1010?');

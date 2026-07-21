@@ -15,6 +15,7 @@ import { AlertsService } from '../alerts/alerts.service';
 import { AgentsService } from '../agents/agents.service';
 import { BusinessObjectsService } from '../business-objects/business-objects.service';
 import { HealthService } from '../health/health.service';
+import { SuppliersService } from '../suppliers/suppliers.service';
 import { hydrateModelOutcomes, reportModelOutcome } from '../llm/openrouter-provider';
 import { openSecret } from '../common/secret-box';
 import type { UserModelConfig } from '../llm/custom-provider';
@@ -154,6 +155,12 @@ const LOCAL_TOOLS = [
     },
   },
   {
+    name: 'getSupplierScorecards',
+    description:
+      'Get supplier reliability scorecards ranked worst-first: on-time delivery rate, lead time (declared and measured from PO history), open and overdue purchase orders, quantity on order, and a 0-100 reliability score. Use for questions about suppliers/vendors — "which supplier is our biggest risk?", "who has the worst on-time rate or longest lead time?", "which supplier has overdue POs?". Takes no arguments; returns all suppliers in scope.',
+    inputSchema: { type: 'object', properties: {} },
+  },
+  {
     name: 'getWarehouseHealth',
     description:
       'Get the composite health score (0-100) for a warehouse with its factor breakdown — days-of-cover, low stock, PO aging and movement anomalies — plus trend and the biggest detractor. Use for "are we OK?", "how healthy is warehouse X?", "why is the score low?", or to investigate/explain a warehouse\'s health. Returns the factors so you can name the biggest risk and recommend an action (reorder, chase POs, investigate a move).',
@@ -195,6 +202,7 @@ export class ChatService {
     private readonly agents: AgentsService,
     private readonly businessObjects: BusinessObjectsService,
     private readonly health: HealthService,
+    private readonly suppliers: SuppliersService,
   ) {}
 
   async getUsage(userId: string) {
@@ -1163,6 +1171,11 @@ export class ChatService {
           })),
         },
       };
+    }
+
+    if (name === 'getSupplierScorecards') {
+      const cards = await this.suppliers.scorecards(user);
+      return { structuredContent: { count: cards.length, records: cards } };
     }
 
     if (name === 'getWarehouseHealth') {
