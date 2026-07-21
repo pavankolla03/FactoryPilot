@@ -48,12 +48,12 @@ export type StockAlert = {
 };
 
 const SUGGESTIONS = [
-  'Show stock for material MAT-10023456 in warehouse 1010',
+  'How many sales orders are to be delivered today in warehouse 1040?',
   'Give me a summary of warehouse 1010',
   'Which materials are running low in warehouse 1030?',
-  'Move product P123 from packing to shipping in warehouse 1010 qty 5',
-  'Alert me when MAT-10023456 in warehouse 1010 drops below 100',
-  'Show open purchase orders for warehouse 1010',
+  'Show goods movements (material documents) in warehouse 1010',
+  'Which deliveries are pending in warehouse 1020, grouped by carrier?',
+  'Which purchase orders are overdue in warehouse 1050?',
 ];
 
 export function ChatPage({

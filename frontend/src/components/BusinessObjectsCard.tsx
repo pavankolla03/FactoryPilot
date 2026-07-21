@@ -14,6 +14,8 @@ export type BusinessObject = {
   default_filters: string | null;
   select_fields: string | null;
   date_field: string | null;
+  status_field: string | null;
+  group_by: string | null;
   api_version: 'v2' | 'v4';
   top_limit: number;
   is_active: boolean;
@@ -29,6 +31,8 @@ const EMPTY: Omit<BusinessObject, 'id' | 'org_id'> = {
   default_filters: "Plant eq '{warehouseId}'",
   select_fields: '',
   date_field: '',
+  status_field: '',
+  group_by: '',
   api_version: 'v2',
   top_limit: 50,
   is_active: true,
@@ -218,6 +222,8 @@ function ObjectEditor({
         {field('Default filters', 'default_filters', "Plant eq '{warehouseId}'", true)}
         {field('Select fields', 'select_fields', 'SalesOrder,Plant,OverallStatus', true)}
         {field('Date field (for "today")', 'date_field', 'RequestedDeliveryDate', true)}
+        {field('Status field (for rollups)', 'status_field', 'OverallStatus', true)}
+        {field('Group-by fields (comma)', 'group_by', 'Route,Carrier', true)}
         <div className="grid grid-cols-2 gap-3">
           <label className="block">
             <span className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-fp-ink-3">
@@ -257,6 +263,8 @@ function ObjectEditor({
               default_filters: f.default_filters || null,
               select_fields: f.select_fields || null,
               date_field: f.date_field || null,
+              status_field: f.status_field || null,
+              group_by: f.group_by || null,
               api_version: f.api_version,
               top_limit: f.top_limit,
             })

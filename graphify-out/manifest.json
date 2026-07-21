@@ -1,7 +1,7 @@
 {
   ".claude/settings.local.json": {
-    "mtime": 1784631153.928523,
-    "ast_hash": "96b8ca85ee07334631743bf70127f5f5",
+    "mtime": 1784632417.9431746,
+    "ast_hash": "6aa9c227b1e5fa5ac16fe459a57460f5",
     "semantic_hash": ""
   },
   ".eslintrc.cjs": {
@@ -95,8 +95,8 @@
     "semantic_hash": "d6eafee8e20e4fb3f8fb9f75af0f0936"
   },
   "frontend/src/components/ChatPage.tsx": {
-    "mtime": 1784618272.9887946,
-    "ast_hash": "cea2ae94f716778e5b43d4e2a0d99fa7",
+    "mtime": 1784632122.1372998,
+    "ast_hash": "7e51c7fcb4cea74cd3ecd9ae86a1d1f5",
     "semantic_hash": ""
   },
   "frontend/src/components/Landing.tsx": {
@@ -155,8 +155,8 @@
     "semantic_hash": "fdd6d3fd2f4b4aacc15893c50b72bfe2"
   },
   "infra/db/schema.sql": {
-    "mtime": 1784626392.6098154,
-    "ast_hash": "7be8333260d56176bf97ea6f1f74e526",
+    "mtime": 1784631440.6777809,
+    "ast_hash": "2eb9541587d0a3abc5b45c012163dd5e",
     "semantic_hash": ""
   },
   "infra/xsuaa-security.json": {
@@ -355,8 +355,8 @@
     "semantic_hash": "e3fa6cda2492cf47bc71bee389ef526f"
   },
   "orchestrator/src/chat/chat.service.ts": {
-    "mtime": 1784626901.3718762,
-    "ast_hash": "3cab3c86bd95e573ad44dc8c87f110c1",
+    "mtime": 1784631798.8286755,
+    "ast_hash": "40a9a87381df8067e74190f61622d288",
     "semantic_hash": ""
   },
   "orchestrator/src/chat/confirm-action-idempotency.test.ts": {
@@ -645,13 +645,13 @@
     "semantic_hash": ""
   },
   "docs/roadmap-phases-u-w-business-objects.md": {
-    "mtime": 1784618409.2911003,
-    "ast_hash": "2be98d31a9214692ec1a16f1dfd8b0fe",
+    "mtime": 1784634860.0244944,
+    "ast_hash": "1640b849f5a71fd6be0380e6347a5dfa",
     "semantic_hash": ""
   },
   "frontend/src/components/BusinessObjectsCard.tsx": {
-    "mtime": 1784627935.363925,
-    "ast_hash": "38a067364bf96e9db5cfb7921fa59dc2",
+    "mtime": 1784631840.6782832,
+    "ast_hash": "b4131256bb81618e8a95c8b4801f5510",
     "semantic_hash": ""
   },
   "integration-mocks/iflow-simulator/src/odata-fixtures.ts": {
@@ -660,13 +660,18 @@
     "semantic_hash": ""
   },
   "orchestrator/src/business-objects/business-objects.controller.ts": {
-    "mtime": 1784626780.96146,
-    "ast_hash": "ee7e55ceded73225c9d0fe7565e47677",
+    "mtime": 1784631852.6031282,
+    "ast_hash": "dcd510d0ff5a5a3cb4b0139f875fb90e",
     "semantic_hash": ""
   },
   "orchestrator/src/business-objects/business-objects.service.ts": {
-    "mtime": 1784626760.0777128,
-    "ast_hash": "94ff00b3b5c19fafead2ce6ce698f012",
+    "mtime": 1784631896.0419805,
+    "ast_hash": "13f9bf9655198565c451ba0c0453233f",
+    "semantic_hash": ""
+  },
+  "orchestrator/src/business-objects/business-object-context.ts": {
+    "mtime": 1784631469.3897898,
+    "ast_hash": "502f95ec3c4a99fae4e3c92bbb4a9ca5",
     "semantic_hash": ""
   }
 }

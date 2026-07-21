@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { DbService } from '../common/db.service';
 import type { AuthUser } from '../common/types';
 import { validationError } from '../common/errors';
+import { contextualize, type BusinessObjectSummary } from './business-object-context';
 
 export interface BusinessObjectRow {
   id: string;
@@ -15,6 +16,9 @@ export interface BusinessObjectRow {
   default_filters: string | null;
   select_fields: string | null;
   date_field: string | null;
+  status_field: string | null;
+  status_labels: Record<string, string> | null;
+  group_by: string | null;
   api_version: string;
   top_limit: number;
   is_active: boolean;
@@ -30,6 +34,8 @@ export interface BusinessObjectInput {
   default_filters?: string | null;
   select_fields?: string | null;
   date_field?: string | null;
+  status_field?: string | null;
+  group_by?: string | null;
   api_version?: string;
   top_limit?: number;
   is_active?: boolean;
@@ -81,8 +87,9 @@ export class BusinessObjectsService {
     const res = await this.db.query<BusinessObjectRow>(
       `INSERT INTO business_objects
         (org_id, object_code, object_name, keywords, destination_name, odata_service_path,
-         entity_set, default_filters, select_fields, date_field, api_version, top_limit, is_active, created_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+         entity_set, default_filters, select_fields, date_field, status_field, group_by,
+         api_version, top_limit, is_active, created_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
        RETURNING *`,
       [
         user.orgId ?? null,
@@ -95,6 +102,8 @@ export class BusinessObjectsService {
         input.default_filters ?? null,
         input.select_fields ?? null,
         input.date_field ?? null,
+        input.status_field ?? null,
+        input.group_by ?? null,
         input.api_version ?? 'v2',
         input.top_limit ?? 50,
         input.is_active ?? true,
@@ -119,10 +128,12 @@ export class BusinessObjectsService {
          default_filters = COALESCE($7, default_filters),
          select_fields = COALESCE($8, select_fields),
          date_field = COALESCE($9, date_field),
-         api_version = COALESCE($10, api_version),
-         top_limit = COALESCE($11, top_limit),
-         is_active = COALESCE($12, is_active),
-         modified_by = $13,
+         status_field = COALESCE($10, status_field),
+         group_by = COALESCE($11, group_by),
+         api_version = COALESCE($12, api_version),
+         top_limit = COALESCE($13, top_limit),
+         is_active = COALESCE($14, is_active),
+         modified_by = $15,
          modified_at = NOW()
        WHERE id = $1 RETURNING *`,
       [
@@ -135,6 +146,8 @@ export class BusinessObjectsService {
         patch.default_filters ?? null,
         patch.select_fields ?? null,
         patch.date_field ?? null,
+        patch.status_field ?? null,
+        patch.group_by ?? null,
         patch.api_version ?? null,
         patch.top_limit ?? null,
         patch.is_active ?? null,
@@ -188,7 +201,13 @@ export class BusinessObjectsService {
   async query(
     user: AuthUser,
     args: { objectCode: string; warehouseId?: string; todayOnly?: boolean; top?: number },
-  ): Promise<{ objectCode: string; objectName: string; dataSource: string; records: Array<Record<string, unknown>> }> {
+  ): Promise<{
+    objectCode: string;
+    objectName: string;
+    dataSource: string;
+    summary: BusinessObjectSummary;
+    records: Array<Record<string, unknown>>;
+  }> {
     const row = await this.resolve(user, args.objectCode);
     if (!row) {
       validationError(
@@ -230,11 +249,20 @@ export class BusinessObjectsService {
       validationError(body.error?.message || `business object query failed (${res.status})`);
     }
     const body = (await res.json()) as { records?: Array<Record<string, unknown>>; dataSource?: string };
+    const records = body.records ?? [];
+    const summary = contextualize(records, {
+      objectName: cfg.object_name,
+      statusField: cfg.status_field,
+      statusLabels: cfg.status_labels,
+      groupBy: (cfg.group_by || '').split(',').map((s) => s.trim()).filter(Boolean),
+      dateField: cfg.date_field,
+    });
     return {
       objectCode: cfg.object_code,
       objectName: cfg.object_name,
       dataSource: body.dataSource ?? 'simulator',
-      records: body.records ?? [],
+      summary,
+      records,
     };
   }
 }

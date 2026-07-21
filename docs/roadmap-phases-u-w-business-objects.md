@@ -16,16 +16,16 @@ Coverage map to the documents:
 
 | Document component | Covered by |
 |---|---|
-| App 1 — Business Object Configuration | **Phase U** |
-| Generic CPI iFlow (one flow, all objects) | **Phase U** |
+| App 1 — Business Object Configuration | ✅ Phase U |
+| Generic CPI iFlow (one flow, all objects) | ✅ Phase U |
 | App 2 — User Token / Rate-Limit Control | ✅ Phase T |
 | App 3 — Cache Configuration | ✅ Phase T |
-| Component 5 — Contextualization & business rules | **Phase V** |
-| Business objects: Sales, Delivery, Shipping, Goods Movement, Purchasing | **Phase V** |
+| Component 5 — Contextualization & business rules | ✅ Phase V |
+| Business objects: Sales, Delivery, Shipping, Goods Movement, Purchasing | ✅ Phase V |
 | Component 6 — Logging & audit | ✅ Phase T |
 | Component 7 — Monitoring dashboard | ✅ Phase T |
 | LLM gateway (OpenRouter) | ✅ shipped |
-| Live S/4 via Business Accelerator Hub OData | **Phase W** |
+| Live S/4 via Business Accelerator Hub OData | **Phase W** (plumbing wired — activates with `SAP_API_KEY`) |
 
 ---
 

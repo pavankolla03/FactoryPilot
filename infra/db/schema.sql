@@ -313,3 +313,25 @@ SELECT * FROM (VALUES
    'Plant eq ''{warehouseId}''', 'PurchaseOrder,Material,Plant,OrderQuantity,DeliveryStatus,Supplier,DeliveryDate', 'DeliveryDate', 'v2', 50)
 ) AS seed(object_code, object_name, keywords, odata_service_path, entity_set, default_filters, select_fields, date_field, api_version, top_limit)
 WHERE NOT EXISTS (SELECT 1 FROM business_objects b WHERE b.object_code = seed.object_code AND b.org_id IS NULL);
+
+-- Phase V: contextualization rules (spec Component 5) — how to summarize each
+-- object into status counts, dimension breakdowns, and date buckets.
+ALTER TABLE business_objects ADD COLUMN IF NOT EXISTS status_field TEXT;
+ALTER TABLE business_objects ADD COLUMN IF NOT EXISTS status_labels JSONB;
+ALTER TABLE business_objects ADD COLUMN IF NOT EXISTS group_by TEXT;
+
+UPDATE business_objects SET status_field = 'OverallStatus',
+  status_labels = '{"A":"Not started","B":"In process","C":"Complete"}'::jsonb, group_by = ''
+  WHERE object_code = 'SALES' AND org_id IS NULL AND status_field IS NULL;
+UPDATE business_objects SET status_field = 'GoodsMovementStatus',
+  status_labels = '{"A":"Not shipped","B":"Partially shipped","C":"Goods issued"}'::jsonb, group_by = 'Route,Carrier'
+  WHERE object_code = 'DELIVERY' AND org_id IS NULL AND status_field IS NULL;
+UPDATE business_objects SET status_field = 'ShippingStatus',
+  status_labels = '{"pending":"Pending","shipped":"Shipped"}'::jsonb, group_by = 'Carrier,Route'
+  WHERE object_code = 'SHIPPING' AND org_id IS NULL AND status_field IS NULL;
+UPDATE business_objects SET status_field = 'GoodsMovementType',
+  status_labels = '{"101":"Goods receipt (101)","601":"Goods issue - delivery (601)","201":"Goods issue - cost center (201)","261":"Goods issue - order (261)"}'::jsonb, group_by = 'GoodsMovementType,Material'
+  WHERE object_code = 'GOODS_MOVEMENT' AND org_id IS NULL AND status_field IS NULL;
+UPDATE business_objects SET status_field = 'DeliveryStatus',
+  status_labels = '{"open":"Open","delivered":"Delivered"}'::jsonb, group_by = 'Supplier'
+  WHERE object_code = 'PURCHASING' AND org_id IS NULL AND status_field IS NULL;

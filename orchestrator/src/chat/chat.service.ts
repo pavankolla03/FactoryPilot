@@ -155,7 +155,7 @@ const LOCAL_TOOLS = [
   {
     name: 'queryBusinessObject',
     description:
-      'Query a registered SAP business object (Sales Orders, Deliveries, Shipping, Goods Movements, Purchase Orders, or any admin-registered object) via the metadata-driven OData registry. Use for questions about orders, deliveries, shipments, goods movements/postings, or purchase orders. Pass objectCode (e.g. SALES, DELIVERY, SHIPPING, GOODS_MOVEMENT, PURCHASING). Set todayOnly=true for "today" questions (e.g. "orders to be delivered today"). Pass warehouseId when the user names or implies a warehouse/plant.',
+      'Query a registered SAP business object via the metadata-driven OData registry and get a contextualized summary (status counts, breakdowns, overdue/today/upcoming buckets) plus the records. objectCode options: SALES (sales orders), DELIVERY (outbound deliveries), SHIPPING (shipments by carrier/route), GOODS_MOVEMENT (SAP material documents / postings, movement types like 101 receipt and 601 issue — use this for "goods movements", "postings", "material documents", NOT for simple stock moves), PURCHASING (purchase orders). Set todayOnly=true for "today" questions (e.g. "orders to be delivered today"). Pass warehouseId when a warehouse/plant is named or implied. Use the returned summary object to answer questions about how many are shipped/pending/overdue or which carrier/supplier — do not call other tools for that.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -1170,6 +1170,9 @@ export class ChatService {
           objectName: result.objectName,
           dataSource: result.dataSource,
           count: result.records.length,
+          // Contextualization (spec Component 5): pre-computed business rollups
+          // so the answer can cite status/breakdown/overdue without more tool calls.
+          summary: result.summary,
           records: result.records,
         },
       };

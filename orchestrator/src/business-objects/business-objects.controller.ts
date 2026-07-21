@@ -15,6 +15,8 @@ const upsertSchema = z.object({
   default_filters: z.string().nullable().optional(),
   select_fields: z.string().nullable().optional(),
   date_field: z.string().nullable().optional(),
+  status_field: z.string().nullable().optional(),
+  group_by: z.string().nullable().optional(),
   api_version: z.enum(['v2', 'v4']).optional(),
   top_limit: z.number().int().positive().max(500).optional(),
   is_active: z.boolean().optional(),
