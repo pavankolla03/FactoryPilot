@@ -1311,6 +1311,32 @@ export class ChatService {
     }
   }
 
+  /** Emit a grounded, LLM-free assistant answer (used by the fallback intents). */
+  private async emitFallbackText(
+    user: AuthUser,
+    convId: string,
+    message: string,
+    start: number,
+    text: string,
+    tools: string[],
+  ): Promise<ChatResponse> {
+    await this.insertMessage(convId, 'assistant', text);
+    const msgId = randomUUID();
+    this.realtime.emitChatToken(user.id, { conversationId: convId, delta: text });
+    this.realtime.emitChatDone(user.id, { conversationId: convId, messageId: msgId, source: 'live', grounded: true });
+    await this.writeSessionLog({
+      userId: user.id,
+      conversationId: convId,
+      queryText: message,
+      toolsInvoked: tools,
+      cacheStatus: 'n/a',
+      tokensUsed: 0,
+      status: 'success',
+      latencyMs: Date.now() - start,
+    });
+    return { conversationId: convId, messageId: msgId, text, source: 'live', grounded: true };
+  }
+
   private async handleFallbackWithoutLlm(
     user: AuthUser,
     convId: string,
@@ -1430,6 +1456,72 @@ export class ChatService {
         latencyMs: Date.now() - start,
       });
       return { conversationId: convId, messageId: msgId, text, source };
+    }
+
+    // Grounded intelligence answers work without the LLM (data is computed, not
+    // generated) — so the Insights "Explain" buttons stay reliable during a
+    // free-model outage.
+    if (lower.includes('health') && warehouseId) {
+      try {
+        this.assertScope(user, warehouseId, 'read');
+        const h = await this.health.detail(user, warehouseId);
+        const action: Record<string, string> = {
+          'Days of cover': 'Replenish the low-cover materials (draft a purchase requisition) to restore 3+ days of cover.',
+          'Low stock': 'Review the low-stock positions and reorder what is below threshold.',
+          'PO aging': 'Chase the overdue purchase orders with the supplier.',
+          'Movement anomalies': 'Investigate the unusually large movements in the Activity audit trail.',
+        };
+        const trend = h.trend === null || h.trend === 0 ? '' : ` (${h.trend > 0 ? '▲ +' : '▼ '}${Math.abs(h.trend)} vs yesterday)`;
+        const text =
+          `**Warehouse ${warehouseId} health: ${h.score}/100 — ${h.band}**${trend}\n\n` +
+          (h.detractor
+            ? `Biggest risk — **${h.detractor.label}**: ${h.detractor.detail}\n\n**What to do:** ${action[h.detractor.label] ?? 'Review the factor breakdown below.'}\n\n`
+            : 'All factors are healthy.\n\n') +
+          h.factors.map((f) => `- ${f.label}: **${f.score}** — ${f.detail}`).join('\n');
+        return this.emitFallbackText(user, convId, message, start, text, ['getWarehouseHealth']);
+      } catch {
+        /* fall through to generic */
+      }
+    }
+
+    if (lower.includes('supplier')) {
+      try {
+        const cards = await this.suppliers.scorecards(user);
+        if (cards.length) {
+          const top = cards[0];
+          const text =
+            `**${top.name}** is the biggest reliability risk: **${top.reliabilityScore}/100 (${top.band})** — ` +
+            `on-time ${top.onTimeRatePct ?? '—'}%, lead time ${top.leadTimeDays ?? '—'}d` +
+            `${top.overduePOs ? `, ${top.overduePOs} overdue PO(s)` : ''}.\n\n` +
+            'Worst-ranked suppliers:\n' +
+            cards
+              .slice(0, 5)
+              .map((c) => `- **${c.name}** — ${c.reliabilityScore}/100 (${c.band}); on-time ${c.onTimeRatePct ?? '—'}%, lead ${c.leadTimeDays ?? '—'}d${c.overduePOs ? `, ${c.overduePOs} overdue` : ''}`)
+              .join('\n') +
+            '\n\n**What to do:** line up a backup source for the top risk and tighten PO follow-up on overdue orders.';
+          return this.emitFallbackText(user, convId, message, start, text, ['getSupplierScorecards']);
+        }
+      } catch {
+        /* fall through */
+      }
+    }
+
+    if ((lower.includes('slot') || lower.includes('reslot') || lower.includes('pick')) && warehouseId) {
+      try {
+        this.assertScope(user, warehouseId, 'read');
+        const { proposals } = await this.slotting.proposals(warehouseId);
+        const text = proposals.length
+          ? `**Slotting for warehouse ${warehouseId}** — ${proposals.length} relocation(s) to shorten pick paths:\n\n` +
+            proposals
+              .slice(0, 5)
+              .map((p) => `- **${p.productId}** ${p.fromLocation} → ${p.toLocation} (${p.qty} units) — picked ${p.picks}× in 7 days\n  ${p.rationale}`)
+              .join('\n') +
+            '\n\nEach can be executed as a governed move from the Insights tab or the Operations Board.'
+          : `No relocation opportunities in warehouse ${warehouseId} — fast movers are already on forward pick faces.`;
+        return this.emitFallbackText(user, convId, message, start, text, ['suggestSlotting']);
+      } catch {
+        /* fall through */
+      }
     }
 
     const fallbackText =

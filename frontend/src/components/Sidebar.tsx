@@ -1,11 +1,12 @@
 import { Icon, LogoMark, initialsOf, paths } from './ui';
 import { useI18n, type Lang, type TranslationKey } from '../i18n';
 
-export type Tab = 'chat' | 'board' | 'autonomy' | 'approvals' | 'usage' | 'logs' | 'users';
+export type Tab = 'chat' | 'board' | 'insights' | 'autonomy' | 'approvals' | 'usage' | 'logs' | 'users';
 
 const NAV: Array<{ id: Tab; labelKey: TranslationKey; icon: string; adminOnly?: boolean }> = [
   { id: 'chat', labelKey: 'nav.assistant', icon: paths.chat },
   { id: 'board', labelKey: 'nav.board', icon: paths.warehouse },
+  { id: 'insights', labelKey: 'nav.insights', icon: paths.spark },
   { id: 'autonomy', labelKey: 'nav.autonomy', icon: paths.bolt },
   { id: 'approvals', labelKey: 'nav.approvals', icon: paths.shield },
   { id: 'usage', labelKey: 'nav.usage', icon: paths.chart },
@@ -54,7 +55,7 @@ export function Sidebar({
           <button key={n.id} className={`nav-item ${tab === n.id ? 'active' : ''}`} onClick={() => onTab(n.id)}>
             <Icon path={n.icon} size={17} />
             <span className="flex-1 text-left">{t(n.labelKey)}</span>
-            {n.id === 'autonomy' && (
+            {(n.id === 'autonomy' || n.id === 'insights') && (
               <span className="rounded-full bg-fp-accent/20 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-[#7FB0E8]">
                 beta
               </span>

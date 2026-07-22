@@ -475,6 +475,7 @@ function App() {
   const pageMeta: Record<Tab, { title: string; subtitle: string }> = {
     chat: { title: t('page.chat.title'), subtitle: t('page.chat.subtitle') },
     board: { title: t('page.board.title'), subtitle: t('page.board.subtitle') },
+    insights: { title: t('page.insights.title'), subtitle: t('page.insights.subtitle') },
     autonomy: { title: t('page.autonomy.title'), subtitle: t('page.autonomy.subtitle') },
     approvals: { title: t('page.approvals.title'), subtitle: t('page.approvals.subtitle') },
     usage: { title: t('page.usage.title'), subtitle: t('page.usage.subtitle') },
@@ -602,7 +603,7 @@ function App() {
 
         {tab === 'board' && <BoardPage client={client} onProposed={showToast} />}
 
-        {tab === 'autonomy' && (
+        {tab === 'insights' && (
           <div>
             <WarehouseHealthCard
               client={client}
@@ -632,6 +633,11 @@ function App() {
                 );
               }}
             />
+          </div>
+        )}
+
+        {tab === 'autonomy' && (
+          <div>
             {role === 'admin' && (
               <AutopilotBar
                 client={client}
