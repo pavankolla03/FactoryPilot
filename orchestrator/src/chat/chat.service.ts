@@ -17,6 +17,7 @@ import { BusinessObjectsService } from '../business-objects/business-objects.ser
 import { HealthService } from '../health/health.service';
 import { SuppliersService } from '../suppliers/suppliers.service';
 import { SlottingService } from '../slotting/slotting.service';
+import { StockoutService } from '../stockout/stockout.service';
 import { hydrateModelOutcomes, reportModelOutcome } from '../llm/openrouter-provider';
 import { openSecret } from '../common/secret-box';
 import type { UserModelConfig } from '../llm/custom-provider';
@@ -156,6 +157,12 @@ const LOCAL_TOOLS = [
     },
   },
   {
+    name: 'getStockoutRadar',
+    description:
+      'Get the predictive stockout radar: materials ranked by days-to-stockout (forecast demand vs on-hand), whether inbound POs cover them in time, lead-time-aware severity (critical/high/watch), and a recommended order quantity. Use for "what will stock out soon?", "what is at risk of running out?", "what should I reorder urgently?". Takes no arguments; covers the user\'s warehouses.',
+    inputSchema: { type: 'object', properties: {} },
+  },
+  {
     name: 'suggestSlotting',
     description:
       'Analyze pick frequency (7 days of movements) for a warehouse and propose bin relocations: fast-moving materials sitting in reserve locations (bulk/receiving) that should move to a forward pick face (packing/shipping) for a shorter pick path. Use for "how can we optimize slotting/picking?", "which materials are in the wrong location?", "reduce picker walking". Returns ranked relocation proposals with rationale; each can be executed as a governed move.',
@@ -215,6 +222,7 @@ export class ChatService {
     private readonly health: HealthService,
     private readonly suppliers: SuppliersService,
     private readonly slotting: SlottingService,
+    private readonly stockout: StockoutService,
   ) {}
 
   async getUsage(userId: string) {
@@ -361,9 +369,12 @@ export class ChatService {
         let completion;
         const llmStart = Date.now();
         try {
-          completion = provider.completeStream
-            ? await provider.completeStream(llmMessages, toolDefs, onTextDelta)
-            : await provider.complete(llmMessages, toolDefs);
+          // Cap each LLM round so a hung free model falls back gracefully
+          // instead of hanging the whole request.
+          const call = provider.completeStream
+            ? provider.completeStream(llmMessages, toolDefs, onTextDelta)
+            : provider.complete(llmMessages, toolDefs);
+          completion = await this.withTimeout(call, Number(process.env.LLM_ROUND_TIMEOUT_MS || 30000));
         } catch (error) {
           const reason = error instanceof Error ? error.message : 'unknown error';
           this.logger.warn(`LLM provider call failed, using keyword fallback: ${reason}`);
@@ -1185,6 +1196,18 @@ export class ChatService {
       };
     }
 
+    if (name === 'getStockoutRadar') {
+      const result = await this.stockout.radar(user);
+      return {
+        structuredContent: {
+          summary: result.summary,
+          count: result.risks.length,
+          records: result.risks,
+          note: 'Uncovered criticals need a purchase requisition now (draftPurchaseRequisition). Covered risks have inbound arriving in time.',
+        },
+      };
+    }
+
     if (name === 'suggestSlotting') {
       const warehouseId = String(args.warehouseId || '');
       this.assertScope(user, warehouseId, 'read');
@@ -1309,6 +1332,23 @@ export class ChatService {
     if (need === 'write' && scope.accessLevel !== 'write') {
       scopeDenied(`You have read-only access to warehouse ${warehouseId}`);
     }
+  }
+
+  /** Reject if a promise doesn't settle within ms (used to bound each LLM round). */
+  private withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+    return new Promise<T>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error(`LLM round exceeded ${ms}ms`)), ms);
+      promise.then(
+        (v) => {
+          clearTimeout(timer);
+          resolve(v);
+        },
+        (e) => {
+          clearTimeout(timer);
+          reject(e);
+        },
+      );
+    });
   }
 
   /** Emit a grounded, LLM-free assistant answer (used by the fallback intents). */
@@ -1501,6 +1541,26 @@ export class ChatService {
             '\n\n**What to do:** line up a backup source for the top risk and tighten PO follow-up on overdue orders.';
           return this.emitFallbackText(user, convId, message, start, text, ['getSupplierScorecards']);
         }
+      } catch {
+        /* fall through */
+      }
+    }
+
+    if (lower.includes('stock out') || lower.includes('stockout') || lower.includes('run out') || lower.includes('running out')) {
+      try {
+        const { risks, summary } = await this.stockout.radar(user);
+        const text = risks.length
+          ? `**Stockout radar** — ${summary.critical} critical, ${summary.high} high, ${summary.uncovered} uncovered:\n\n` +
+            risks
+              .slice(0, 8)
+              .map(
+                (r) =>
+                  `- **${r.materialId}** (WH ${r.warehouseId}) — out in **${r.daysToStockout} day(s)** at ${r.dailyDemand}/day${r.covered ? ' — covered by inbound' : `; reorder ${r.recommendedOrderQty}${r.supplier ? ` from ${r.supplier}` : ''}`}`,
+              )
+              .join('\n') +
+            '\n\n**What to do:** draft purchase requisitions for the uncovered criticals now.'
+          : 'No materials are projected to stock out within the next 30 days.';
+        return this.emitFallbackText(user, convId, message, start, text, ['getStockoutRadar']);
       } catch {
         /* fall through */
       }

@@ -28,6 +28,7 @@ import { WarehouseHealthCard } from './components/WarehouseHealthCard';
 import { SuppliersCard } from './components/SuppliersCard';
 import { SlottingCard } from './components/SlottingCard';
 import { ScenarioStudioCard } from './components/ScenarioStudioCard';
+import { StockoutRadarCard } from './components/StockoutRadarCard';
 import { AnalyticsPage, type AnalyticsOverview } from './components/AnalyticsPage';
 import { Icon, PageHeader, paths } from './components/ui';
 import { useI18n } from './i18n';
@@ -613,6 +614,13 @@ function App() {
                 void sendChat(
                   `Explain the health score for warehouse ${wh}: what is the biggest risk driving it down, and what should I do about it?`,
                 );
+              }}
+            />
+            <StockoutRadarCard
+              client={client}
+              onReorder={(wh, mat, qty) => {
+                setTab('chat');
+                void sendChat(`Draft a purchase requisition for ${qty} units of ${mat} in warehouse ${wh}.`);
               }}
             />
             <ScenarioStudioCard client={client} />
