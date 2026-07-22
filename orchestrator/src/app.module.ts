@@ -20,6 +20,8 @@ import { SuppliersController } from './suppliers/suppliers.controller';
 import { SuppliersService } from './suppliers/suppliers.service';
 import { SlottingController } from './slotting/slotting.controller';
 import { SlottingService } from './slotting/slotting.service';
+import { ScenarioController } from './scenario/scenario.controller';
+import { ScenarioService } from './scenario/scenario.service';
 import { DbService } from './common/db.service';
 import { RedisService } from './common/redis.service';
 import { LlmProviderFactory } from './llm/provider.factory';
@@ -41,6 +43,7 @@ import { RealtimeGateway } from './realtime/realtime.gateway';
     HealthController,
     SuppliersController,
     SlottingController,
+    ScenarioController,
   ],
   providers: [
     DbService,
@@ -56,6 +59,7 @@ import { RealtimeGateway } from './realtime/realtime.gateway';
     HealthService,
     SuppliersService,
     SlottingService,
+    ScenarioService,
   ],
 })
 export class AppModule {}

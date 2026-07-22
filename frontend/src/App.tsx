@@ -27,6 +27,7 @@ import { BusinessObjectsCard } from './components/BusinessObjectsCard';
 import { WarehouseHealthCard } from './components/WarehouseHealthCard';
 import { SuppliersCard } from './components/SuppliersCard';
 import { SlottingCard } from './components/SlottingCard';
+import { ScenarioStudioCard } from './components/ScenarioStudioCard';
 import { AnalyticsPage, type AnalyticsOverview } from './components/AnalyticsPage';
 import { Icon, PageHeader, paths } from './components/ui';
 import { useI18n } from './i18n';
@@ -614,6 +615,7 @@ function App() {
                 );
               }}
             />
+            <ScenarioStudioCard client={client} />
             <SuppliersCard
               client={client}
               onExplain={() => {
