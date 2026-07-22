@@ -14,6 +14,7 @@ import type { HealthService } from '../health/health.service';
 import type { SuppliersService } from '../suppliers/suppliers.service';
 import type { SlottingService } from '../slotting/slotting.service';
 import type { StockoutService } from '../stockout/stockout.service';
+import type { EsgService } from '../esg/esg.service';
 import type { AuthUser } from '../common/types';
 
 interface StoredMessage {
@@ -169,6 +170,10 @@ function buildFakes() {
     radar: async () => ({ risks: [], summary: { critical: 0, high: 0, uncovered: 0 } }),
   } as unknown as StockoutService;
 
+  const esg = {
+    report: async () => ({ warehouses: [], summary: { totalKg: 0, transportKg: 0, handlingKg: 0, intensityKgPerUnit: 0, byMode: [], topSuppliers: [], dailyTrend: [] } }),
+  } as unknown as EsgService;
+
   return {
     db,
     redis,
@@ -183,6 +188,7 @@ function buildFakes() {
     suppliers,
     slotting,
     stockout,
+    esg,
     providerRounds,
     sessionLogs,
     messages,
@@ -214,6 +220,7 @@ describe('agent loop', () => {
       fakes.suppliers,
       fakes.slotting,
       fakes.stockout,
+      fakes.esg,
     );
 
     const response = await service.chat(user, undefined, 'how much MAT-1 in 1010?');
@@ -250,6 +257,7 @@ describe('agent loop', () => {
       fakes.suppliers,
       fakes.slotting,
       fakes.stockout,
+      fakes.esg,
     );
 
     await service.chat(user, undefined, 'how much MAT-1 in 1010?');

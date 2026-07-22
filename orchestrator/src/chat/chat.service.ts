@@ -18,6 +18,7 @@ import { HealthService } from '../health/health.service';
 import { SuppliersService } from '../suppliers/suppliers.service';
 import { SlottingService } from '../slotting/slotting.service';
 import { StockoutService } from '../stockout/stockout.service';
+import { EsgService } from '../esg/esg.service';
 import { hydrateModelOutcomes, reportModelOutcome } from '../llm/openrouter-provider';
 import { openSecret } from '../common/secret-box';
 import type { UserModelConfig } from '../llm/custom-provider';
@@ -157,6 +158,12 @@ const LOCAL_TOOLS = [
     },
   },
   {
+    name: 'getEsgReport',
+    description:
+      'Get the ESG / sustainability carbon estimate: total CO2e from inbound transport (supplier distance × freight mode) and internal handling (warehouse moves), broken down per warehouse, by freight mode, and by top-emitting supplier, plus carbon intensity (kg CO2e per unit moved). Use for "what is our carbon footprint?", "sustainability report", "emissions by supplier/mode", "how green are we?". Takes no arguments.',
+    inputSchema: { type: 'object', properties: {} },
+  },
+  {
     name: 'getStockoutRadar',
     description:
       'Get the predictive stockout radar: materials ranked by days-to-stockout (forecast demand vs on-hand), whether inbound POs cover them in time, lead-time-aware severity (critical/high/watch), and a recommended order quantity. Use for "what will stock out soon?", "what is at risk of running out?", "what should I reorder urgently?". Takes no arguments; covers the user\'s warehouses.',
@@ -223,6 +230,7 @@ export class ChatService {
     private readonly suppliers: SuppliersService,
     private readonly slotting: SlottingService,
     private readonly stockout: StockoutService,
+    private readonly esg: EsgService,
   ) {}
 
   async getUsage(userId: string) {
@@ -1196,6 +1204,11 @@ export class ChatService {
       };
     }
 
+    if (name === 'getEsgReport') {
+      const report = await this.esg.report(user);
+      return { structuredContent: report };
+    }
+
     if (name === 'getStockoutRadar') {
       const result = await this.stockout.radar(user);
       return {
@@ -1541,6 +1554,23 @@ export class ChatService {
             '\n\n**What to do:** line up a backup source for the top risk and tighten PO follow-up on overdue orders.';
           return this.emitFallbackText(user, convId, message, start, text, ['getSupplierScorecards']);
         }
+      } catch {
+        /* fall through */
+      }
+    }
+
+    if (lower.includes('carbon') || lower.includes('emission') || lower.includes('esg') || lower.includes('sustainab') || lower.includes('footprint')) {
+      try {
+        const r = await this.esg.report(user);
+        const s = r.summary;
+        const text =
+          `**Carbon footprint: ${s.totalKg.toLocaleString()} kg CO₂e** — ${s.transportKg.toLocaleString()} from inbound transport, ${s.handlingKg.toLocaleString()} from warehouse handling. Intensity: ${s.intensityKgPerUnit} kg per unit moved.\n\n` +
+          (s.byMode.length ? `By mode: ${s.byMode.map((m) => `${m.mode} ${m.kg.toLocaleString()}kg`).join(', ')}.\n\n` : '') +
+          (s.topSuppliers.length
+            ? 'Top-emitting suppliers:\n' + s.topSuppliers.map((t) => `- **${t.supplier}** — ${t.kg.toLocaleString()} kg (${t.mode})`).join('\n')
+            : '') +
+          '\n\n**To cut it:** shift far-sourced volume to nearer/lower-carbon suppliers, and consolidate inbound shipments.';
+        return this.emitFallbackText(user, convId, message, start, text, ['getEsgReport']);
       } catch {
         /* fall through */
       }

@@ -1,7 +1,7 @@
 {
   ".claude/settings.local.json": {
-    "mtime": 1784689898.4922345,
-    "ast_hash": "3e9770b6cde3fd150d72e2db10a0817b",
+    "mtime": 1784733745.8380065,
+    "ast_hash": "753af1b1ca3e2f857184d4ba81522838",
     "semantic_hash": ""
   },
   ".eslintrc.cjs": {
@@ -60,8 +60,8 @@
     "semantic_hash": "f730ac257d2fe94a3bf5912a00ae69c6"
   },
   "frontend/src/App.tsx": {
-    "mtime": 1784692113.212718,
-    "ast_hash": "01783b8914cfaa65f799cf11c0a36dc8",
+    "mtime": 1784733624.7429726,
+    "ast_hash": "72b420c0001c8445c9e40528edc72d7b",
     "semantic_hash": ""
   },
   "frontend/src/components/ActivityPage.tsx": {
@@ -310,8 +310,8 @@
     "semantic_hash": "cca3d789b9e10c2089cd18fb82907b5d"
   },
   "orchestrator/src/app.module.ts": {
-    "mtime": 1784692029.6246438,
-    "ast_hash": "ba10f17d2f899ad002f25215a5688960",
+    "mtime": 1784733470.5124469,
+    "ast_hash": "fa0d821ece5b13b7c1aec96158e9a699",
     "semantic_hash": ""
   },
   "orchestrator/src/auth/auth.controller.ts": {
@@ -340,8 +340,8 @@
     "semantic_hash": "667be8a4271ff5beaad188b98e915985"
   },
   "orchestrator/src/chat/agent-loop.test.ts": {
-    "mtime": 1784654487.0523098,
-    "ast_hash": "e7a89c6076711bc4dc03dd868d85ab35",
+    "mtime": 1784733549.5596611,
+    "ast_hash": "ad35205ab1a6f94de309fe56e42f33ab",
     "semantic_hash": ""
   },
   "orchestrator/src/chat/chat.controller.ts": {
@@ -355,8 +355,8 @@
     "semantic_hash": "e3fa6cda2492cf47bc71bee389ef526f"
   },
   "orchestrator/src/chat/chat.service.ts": {
-    "mtime": 1784688537.7472053,
-    "ast_hash": "6f20e866892291aa8750977bd7f3c6a0",
+    "mtime": 1784734102.2388234,
+    "ast_hash": "494e112f6f54748dc0d1d633ef2d3e94",
     "semantic_hash": ""
   },
   "orchestrator/src/chat/confirm-action-idempotency.test.ts": {
@@ -752,6 +752,21 @@
   "docs/roadmap-phases-aa-ac.md": {
     "mtime": 1784691852.930635,
     "ast_hash": "373a57efd0c808841176ac11df87ee0b",
+    "semantic_hash": ""
+  },
+  "frontend/src/components/StockoutRadarCard.tsx": {
+    "mtime": 1784733605.9375303,
+    "ast_hash": "39cdcecefd8dfacfc762811b1bc26348",
+    "semantic_hash": ""
+  },
+  "orchestrator/src/stockout/stockout.controller.ts": {
+    "mtime": 1784733438.428127,
+    "ast_hash": "f4fa9c682b895f0ca66dd10807562da5",
+    "semantic_hash": ""
+  },
+  "orchestrator/src/stockout/stockout.service.ts": {
+    "mtime": 1784733859.8071654,
+    "ast_hash": "818ab964fc47a07007b4cddf3f93e980",
     "semantic_hash": ""
   }
 }

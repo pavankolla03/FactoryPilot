@@ -1,7 +1,7 @@
 {
   ".claude/settings.local.json": {
-    "mtime": 1784733745.8380065,
-    "ast_hash": "753af1b1ca3e2f857184d4ba81522838",
+    "mtime": 1784735896.5397882,
+    "ast_hash": "b436ccb2a8f4db0f937ef9e08fd802cc",
     "semantic_hash": ""
   },
   ".eslintrc.cjs": {
@@ -60,8 +60,8 @@
     "semantic_hash": "f730ac257d2fe94a3bf5912a00ae69c6"
   },
   "frontend/src/App.tsx": {
-    "mtime": 1784733624.7429726,
-    "ast_hash": "72b420c0001c8445c9e40528edc72d7b",
+    "mtime": 1784735793.6682675,
+    "ast_hash": "76c3d4e1e0c0f48c57070eb7948102d0",
     "semantic_hash": ""
   },
   "frontend/src/components/ActivityPage.tsx": {
@@ -310,8 +310,8 @@
     "semantic_hash": "cca3d789b9e10c2089cd18fb82907b5d"
   },
   "orchestrator/src/app.module.ts": {
-    "mtime": 1784733470.5124469,
-    "ast_hash": "fa0d821ece5b13b7c1aec96158e9a699",
+    "mtime": 1784735634.136634,
+    "ast_hash": "63e1e0c1be7c53b942fbb1c49cbd9af1",
     "semantic_hash": ""
   },
   "orchestrator/src/auth/auth.controller.ts": {
@@ -340,8 +340,8 @@
     "semantic_hash": "667be8a4271ff5beaad188b98e915985"
   },
   "orchestrator/src/chat/agent-loop.test.ts": {
-    "mtime": 1784733549.5596611,
-    "ast_hash": "ad35205ab1a6f94de309fe56e42f33ab",
+    "mtime": 1784735713.8754265,
+    "ast_hash": "902fb33fd2207d48256bd63f33884948",
     "semantic_hash": ""
   },
   "orchestrator/src/chat/chat.controller.ts": {
@@ -355,8 +355,8 @@
     "semantic_hash": "e3fa6cda2492cf47bc71bee389ef526f"
   },
   "orchestrator/src/chat/chat.service.ts": {
-    "mtime": 1784734102.2388234,
-    "ast_hash": "494e112f6f54748dc0d1d633ef2d3e94",
+    "mtime": 1784735683.1813345,
+    "ast_hash": "fd04519dd967f77dd995639a2757b5f8",
     "semantic_hash": ""
   },
   "orchestrator/src/chat/confirm-action-idempotency.test.ts": {
@@ -767,6 +767,21 @@
   "orchestrator/src/stockout/stockout.service.ts": {
     "mtime": 1784733859.8071654,
     "ast_hash": "818ab964fc47a07007b4cddf3f93e980",
+    "semantic_hash": ""
+  },
+  "frontend/src/components/EsgCard.tsx": {
+    "mtime": 1784735756.5217972,
+    "ast_hash": "60242be6e3df9664f137a6e16a9c68d0",
+    "semantic_hash": ""
+  },
+  "orchestrator/src/esg/esg.controller.ts": {
+    "mtime": 1784735606.3882873,
+    "ast_hash": "d144fa6c4954df2fe295f2d701279edf",
+    "semantic_hash": ""
+  },
+  "orchestrator/src/esg/esg.service.ts": {
+    "mtime": 1784735595.5409062,
+    "ast_hash": "907a79b6674f7f8d21f2db559b396059",
     "semantic_hash": ""
   }
 }

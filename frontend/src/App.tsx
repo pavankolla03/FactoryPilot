@@ -29,6 +29,7 @@ import { SuppliersCard } from './components/SuppliersCard';
 import { SlottingCard } from './components/SlottingCard';
 import { ScenarioStudioCard } from './components/ScenarioStudioCard';
 import { StockoutRadarCard } from './components/StockoutRadarCard';
+import { EsgCard } from './components/EsgCard';
 import { AnalyticsPage, type AnalyticsOverview } from './components/AnalyticsPage';
 import { Icon, PageHeader, paths } from './components/ui';
 import { useI18n } from './i18n';
@@ -642,6 +643,10 @@ function App() {
                   `Analyze slotting for warehouse ${wh}: which fast-moving materials are in the wrong location and how should we reslot them to cut picker walking?`,
                 );
               }}
+            />
+            <EsgCard
+              client={client}
+              onExport={() => void exportCsv('/api/ops/esg/export.csv', 'factorypilot-esg.csv')}
             />
           </div>
         )}
