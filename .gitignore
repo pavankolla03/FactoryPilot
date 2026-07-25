@@ -10,3 +10,6 @@ coverage
 # generated pitch deck deliverables
 FactoryPilot-Client-Briefing.pptx
 FactoryPilot-Client-Briefing.pdf
+
+# generated knowledge graph (regenerate with: graphify update .)
+graphify-out/

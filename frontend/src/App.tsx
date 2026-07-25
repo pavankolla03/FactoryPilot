@@ -484,6 +484,7 @@ function App() {
     approvals: { title: t('page.approvals.title'), subtitle: t('page.approvals.subtitle') },
     usage: { title: t('page.usage.title'), subtitle: t('page.usage.subtitle') },
     logs: { title: t('page.logs.title'), subtitle: t('page.logs.subtitle') },
+    connections: { title: t('page.connections.title'), subtitle: t('page.connections.subtitle') },
     users: { title: t('page.users.title'), subtitle: t('page.users.subtitle') },
   };
   const meta = pageMeta[tab];
@@ -752,6 +753,13 @@ function App() {
           />
         )}
 
+        {tab === 'connections' && role === 'admin' && (
+          <div className="space-y-5">
+            <ConnectionsCard client={client} onSaved={showToast} />
+            <BusinessObjectsCard client={client} onSaved={showToast} />
+          </div>
+        )}
+
         {tab === 'users' && role === 'admin' && (
           <UsersPage
             users={users}
@@ -797,13 +805,7 @@ function App() {
                 await refreshUsers();
               }, url ? 'Webhook saved — notifications will be delivered there.' : 'Webhook removed.')
             }
-            cachePoliciesSlot={
-              <>
-                <ConnectionsCard client={client} onSaved={showToast} />
-                <BusinessObjectsCard client={client} onSaved={showToast} />
-                <CachePoliciesCard client={client} onSaved={showToast} />
-              </>
-            }
+            cachePoliciesSlot={<CachePoliciesCard client={client} onSaved={showToast} />}
             warehousePolicies={warehousePolicies}
             onWarehousePolicy={(warehouseId, maxQty, makerChecker) =>
               withFeedback(async () => {
