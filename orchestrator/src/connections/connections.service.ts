@@ -159,8 +159,18 @@ export class ConnectionsService {
          ORDER BY (org_id IS NOT NULL) DESC, updated_at DESC LIMIT 1`,
         [kind, orgId ?? null],
       );
-      const row = rows.rows[0];
-      if (!row) return null;
+      let row = rows.rows[0];
+      if (!row) {
+        // Internal callers often have no tenant context. In a single-tenant
+        // deployment the one active connection is unambiguous; with several
+        // orgs configured we stay conservative and serve none.
+        const any = await this.db.query<ConnectionRow>(
+          'SELECT * FROM connections WHERE kind = $1 AND active = true LIMIT 2',
+          [kind],
+        );
+        if (any.rows.length !== 1) return null;
+        row = any.rows[0];
+      }
       const secrets = row.secrets_enc ? (JSON.parse(openSecret(row.secrets_enc)) as Record<string, string>) : {};
       return { id: row.id, name: row.name, kind: row.kind, ...row.config, ...secrets };
     } catch (error) {

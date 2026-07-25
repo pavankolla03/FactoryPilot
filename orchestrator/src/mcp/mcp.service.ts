@@ -1,6 +1,7 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import { LiveDataService } from '../live/live-data.service';
 
 export interface ToolDescriptor {
   name: string;
@@ -15,7 +16,7 @@ export class McpService implements OnModuleInit {
   private readonly servers: Record<string, string>;
   private readonly tools = new Map<string, ToolDescriptor>();
 
-  constructor() {
+  constructor(private readonly live: LiveDataService) {
     const raw = process.env.MCP_SERVERS || '{}';
     this.servers = JSON.parse(raw) as Record<string, string>;
   }
@@ -50,7 +51,20 @@ export class McpService implements OnModuleInit {
     return this.tools.get(name);
   }
 
-  async callTool(name: string, args: Record<string, unknown>) {
+  async callTool(name: string, args: Record<string, unknown>, orgId?: string | null) {
+    // Live SAP wins over the simulator (Phase AF). Intercepting here means every
+    // consumer — chat, board, Insights cards and the agents — reads real data
+    // wherever a connected source can answer, with no per-service wiring.
+    if (this.live.canServe(name)) {
+      const served = await this.live.serve(name, args, orgId).catch((error) => {
+        this.logger.warn(`live serve(${name}) failed: ${error instanceof Error ? error.message : 'unknown'}`);
+        return null;
+      });
+      if (served) {
+        return served as unknown as Record<string, unknown>;
+      }
+    }
+
     const tool = this.tools.get(name);
     if (!tool) {
       throw new Error(`Unknown tool: ${name}`);

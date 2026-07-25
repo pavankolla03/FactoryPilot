@@ -26,6 +26,7 @@ import { StockoutController } from './stockout/stockout.controller';
 import { StockoutService } from './stockout/stockout.service';
 import { ConnectionsController } from './connections/connections.controller';
 import { ConnectionsService } from './connections/connections.service';
+import { LiveDataService } from './live/live-data.service';
 import { EsgController } from './esg/esg.controller';
 import { EsgService } from './esg/esg.service';
 import { DbService } from './common/db.service';
@@ -72,6 +73,7 @@ import { RealtimeGateway } from './realtime/realtime.gateway';
     StockoutService,
     EsgService,
     ConnectionsService,
+    LiveDataService,
   ],
 })
 export class AppModule {}

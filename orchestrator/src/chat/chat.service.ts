@@ -19,6 +19,7 @@ import { SuppliersService } from '../suppliers/suppliers.service';
 import { SlottingService } from '../slotting/slotting.service';
 import { StockoutService } from '../stockout/stockout.service';
 import { EsgService } from '../esg/esg.service';
+import { LiveDataService } from '../live/live-data.service';
 import { hydrateModelOutcomes, reportModelOutcome } from '../llm/openrouter-provider';
 import { openSecret } from '../common/secret-box';
 import type { UserModelConfig } from '../llm/custom-provider';
@@ -231,6 +232,7 @@ export class ChatService {
     private readonly slotting: SlottingService,
     private readonly stockout: StockoutService,
     private readonly esg: EsgService,
+    private readonly live: LiveDataService,
   ) {}
 
   async getUsage(userId: string) {
@@ -460,7 +462,7 @@ export class ChatService {
             try {
               ({ data, cacheHit } = this.isLocalTool(call.name)
                 ? { data: await this.executeLocalTool(user, call.name, call.arguments), cacheHit: false }
-                : await this.readToolWithCache(call.name, call.arguments, user.id));
+                : await this.readToolWithCache(call.name, call.arguments, user.id, user.orgId));
             } catch (error) {
               const failed: ChatToolEvent = {
                 id: stepId,
@@ -828,7 +830,7 @@ export class ChatService {
     }
     this.assertScope(user, warehouseId, 'read');
 
-    const { data, cacheHit } = await this.readToolWithCache('listWarehouseStock', { warehouseId }, user.id);
+    const { data, cacheHit } = await this.readToolWithCache('listWarehouseStock', { warehouseId }, user.id, user.orgId);
     const structured = (data as { structuredContent?: { records?: unknown[]; dataSource?: string } })
       .structuredContent;
     return {
@@ -1735,10 +1737,24 @@ export class ChatService {
     return this.cachePolicyState.map.get(toolName);
   }
 
-  private async readToolWithCache(toolName: string, params: Record<string, unknown>, userId?: string) {
+  private async readToolWithCache(
+    toolName: string,
+    params: Record<string, unknown>,
+    userId?: string,
+    orgId?: string | null,
+  ) {
     if (toolName === 'getRecentMovements') {
       const live = await this.mcp.callTool(toolName, params);
       return { data: live, cacheHit: false };
+    }
+
+    // Live SAP wins over the simulator (Phase AF). Returns null when there is no
+    // connected source for this tool/plant, so mock still answers those.
+    if (this.live.canServe(toolName)) {
+      const served = await this.live.serve(toolName, params, orgId).catch(() => null);
+      if (served) {
+        return { data: served, cacheHit: false };
+      }
     }
 
     const policy = await this.getCachePolicy(toolName);
