@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { DbService } from '../common/db.service';
 import { sealSecret, openSecret } from '../common/secret-box';
 import { validationError } from '../common/errors';
+import { SapIflowClient, type IflowOverride } from '../business-objects/sap-iflow.client';
 import type { AuthUser } from '../common/types';
 
 export type ConnectionKind = 'iflow' | 's4hana' | 'btp';
@@ -36,6 +37,8 @@ const SECRET_FIELDS: Record<ConnectionKind, string[]> = {
 @Injectable()
 export class ConnectionsService {
   private readonly logger = new Logger(ConnectionsService.name);
+
+  private readonly iflow = new SapIflowClient();
 
   constructor(private readonly db: DbService) {}
 
@@ -205,42 +208,20 @@ export class ConnectionsService {
     return {};
   }
 
-  /** iFlow probe: a minimal OData request through the customer's endpoint. */
+  /**
+   * iFlow probe — delegates to SapIflowClient so the test uses exactly the same
+   * request/parse path as real queries (XML payloads, fixed endpoints, OAuth2).
+   */
   private async testIflow(cfg: Record<string, string>): Promise<{ ok: boolean; message: string }> {
     if (!cfg.url) {
       return { ok: false, message: 'endpoint URL is required' };
     }
-    const headers: Record<string, string> = { Accept: 'application/json', ...this.authHeaders(cfg) };
-    if ((cfg.auth || '').toLowerCase() === 'oauth2') {
-      headers.Authorization = `Bearer ${await this.oauthToken(cfg)}`;
-    }
-    const probe = {
-      service: cfg.probeService || '/sap/opu/odata/sap/API_PRODUCT_SRV',
-      entitySet: cfg.probeEntitySet || 'A_Product',
-      top: 1,
-    };
-    const method = (cfg.method || 'POST').toUpperCase();
-    const res =
-      method === 'GET'
-        ? await fetch(`${cfg.url}?service=${encodeURIComponent(probe.service)}&entitySet=${probe.entitySet}&top=1`, { headers })
-        : await fetch(cfg.url, {
-            method: 'POST',
-            headers: { ...headers, 'Content-Type': 'application/json' },
-            body: JSON.stringify(probe),
-          });
-    if (!res.ok) {
-      const body = await res.text().catch(() => '');
-      return { ok: false, message: `iFlow returned ${res.status}${body ? ` — ${body.slice(0, 120)}` : ''}` };
-    }
-    const body = (await res.json().catch(() => ({}))) as Record<string, unknown>;
-    const rows = Array.isArray(body.records)
-      ? body.records.length
-      : Array.isArray((body.d as { results?: unknown[] })?.results)
-        ? (body.d as { results: unknown[] }).results.length
-        : Array.isArray(body.value)
-          ? (body.value as unknown[]).length
-          : 0;
-    return { ok: true, message: `Reachable — iFlow responded with ${rows} row(s)` };
+    const probe = await this.iflow.testConnection(
+      cfg.probeService || '/sap/opu/odata/sap/API_PRODUCT_SRV',
+      cfg.probeEntitySet || 'A_Product',
+      cfg as unknown as IflowOverride,
+    );
+    return { ok: probe.ok, message: probe.message };
   }
 
   /** S/4HANA or Business Accelerator Hub: direct OData $top=1 probe. */

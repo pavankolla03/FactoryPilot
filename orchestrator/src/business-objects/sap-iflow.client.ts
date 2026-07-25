@@ -41,6 +41,11 @@ export interface IflowOverride {
   clientSecret?: string;
   /** Direct S/4HANA / BAH base URL (used when no iFlow is configured). */
   baseUrl?: string;
+  /**
+   * The iFlow exposes one fixed operation and ignores query params (common for
+   * a first iFlow, e.g. /http/materialstockread). Send a bare GET.
+   */
+  fixedEndpoint?: boolean | string;
 }
 
 export class SapIflowClient {
@@ -133,6 +138,118 @@ export class SapIflowClient {
     return body.access_token;
   }
 
+  /**
+   * Parse an XML payload into records. Handles the shape SAP iFlow message
+   * mapping emits (a wrapper element containing repeated row elements), which is
+   * not Atom/OData XML. Picks the most-repeated element that has children as the
+   * row, then reads its leaf fields.
+   */
+  private parseXmlRecords(xml: string): Array<Record<string, unknown>> {
+    const body = xml.replace(/<\?xml[^>]*\?>/gi, '').replace(/<!--[\s\S]*?-->/g, '');
+    const counts = new Map<string, number>();
+    for (const m of body.matchAll(/<([A-Za-z_][\w.:-]*)\b[^>/]*>/g)) {
+      counts.set(m[1], (counts.get(m[1]) ?? 0) + 1);
+    }
+
+    let rowTag = '';
+    let best = 0;
+    for (const [tag, count] of counts) {
+      if (count <= best) continue;
+      const probe = new RegExp(`<${tag}\\b[^>]*>([\\s\\S]*?)</${tag}>`).exec(body);
+      if (probe && /<[A-Za-z_]/.test(probe[1])) {
+        rowTag = tag;
+        best = count;
+      }
+    }
+    if (!rowTag) {
+      return [];
+    }
+
+    const decode = (v: string) =>
+      v
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>')
+        .replace(/&quot;/g, '"')
+        .replace(/&#39;/g, "'")
+        .replace(/&amp;/g, '&')
+        .trim();
+
+    const records: Array<Record<string, unknown>> = [];
+    for (const rowMatch of body.matchAll(new RegExp(`<${rowTag}\\b[^>]*>([\\s\\S]*?)</${rowTag}>`, 'g'))) {
+      const inner = rowMatch[1];
+      const rec: Record<string, unknown> = {};
+      for (const f of inner.matchAll(/<([A-Za-z_][\w.:-]*)\b[^>]*>([\s\S]*?)<\/\1>/g)) {
+        if (/<[A-Za-z_]/.test(f[2])) continue; // nested, not a leaf
+        rec[f[1]] = decode(f[2]);
+      }
+      for (const f of inner.matchAll(/<([A-Za-z_][\w.:-]*)\b[^>]*\/>/g)) {
+        if (!(f[1] in rec)) rec[f[1]] = '';
+      }
+      if (Object.keys(rec).length) records.push(rec);
+    }
+    return records;
+  }
+
+  /**
+   * Fixed-endpoint iFlows ignore $filter/$top, so apply them here instead — the
+   * caller still gets contract behaviour (and the LLM never sees 2,700 rows).
+   * Supports the clauses the registry generates: `Field eq 'value'` (and
+   * datetime literals) joined by `and`.
+   */
+  private applyClientSide(records: Array<Record<string, unknown>>, q: ODataQuery): Array<Record<string, unknown>> {
+    let out = records;
+    if (q.filter) {
+      const clauses = q.filter.split(/\s+and\s+/i);
+      out = out.filter((row) =>
+        clauses.every((clause) => {
+          const m = /^\s*([A-Za-z_][\w.]*)\s+eq\s+(.+?)\s*$/.exec(clause);
+          if (!m) return true; // unsupported clause — don't exclude
+          const [, field, rawValue] = m;
+          const dt = /^datetime'([^']+)'$/i.exec(rawValue);
+          const actual = String(row[field] ?? '');
+          if (dt) return actual.slice(0, 10) === dt[1].slice(0, 10);
+          const value =
+            rawValue.startsWith("'") && rawValue.endsWith("'")
+              ? rawValue.slice(1, -1).replace(/''/g, "'")
+              : rawValue;
+          return actual === value;
+        }),
+      );
+    }
+    if (q.top && out.length > q.top) {
+      out = out.slice(0, q.top);
+    }
+    // Project $select too — a fixed endpoint returns every mapped field, which is
+    // mostly empty noise and needlessly expensive for the model to read.
+    if (q.select) {
+      const keep = q.select.split(',').map((f) => f.trim()).filter(Boolean);
+      if (keep.length) {
+        out = out.map((row) => {
+          const slim: Record<string, unknown> = {};
+          for (const k of keep) {
+            if (row[k] !== undefined && row[k] !== '') slim[k] = row[k];
+          }
+          return Object.keys(slim).length ? slim : row;
+        });
+      }
+    }
+    return out;
+  }
+
+  /** Reads a response as JSON, falling back to XML when the iFlow returns XML. */
+  private async readBody(res: Response): Promise<{ records: Array<Record<string, unknown>>; dataSource?: string }> {
+    const text = await res.text();
+    const trimmed = text.trimStart();
+    if (trimmed.startsWith('<')) {
+      return { records: this.parseXmlRecords(text), dataSource: 'sap-iflow-xml' };
+    }
+    try {
+      return this.normalize(JSON.parse(text));
+    } catch {
+      return { records: [] };
+    }
+  }
+
   /** Accepts {records}, raw OData v2 {d:{results}}, v4 {value}, or a bare array. */
   private normalize(body: unknown): { records: Array<Record<string, unknown>>; dataSource?: string } {
     if (Array.isArray(body)) {
@@ -157,9 +274,10 @@ export class SapIflowClient {
 
     if (iflowUrl) {
       const headers: Record<string, string> = { Accept: 'application/json', ...(await this.authHeaders(ov)) };
+      const fixed = ov?.fixedEndpoint === true || ov?.fixedEndpoint === 'true';
       const res =
         this.methodOf(ov) === 'GET'
-          ? await fetch(this.buildGetUrl(iflowUrl, q), { headers })
+          ? await fetch(fixed ? iflowUrl : this.buildGetUrl(iflowUrl, q).toString(), { headers })
           : await fetch(iflowUrl, {
               method: 'POST',
               headers: { ...headers, 'Content-Type': 'application/json' },
@@ -170,8 +288,9 @@ export class SapIflowClient {
         this.logger.warn(`iFlow call failed ${res.status}: ${text.slice(0, 200)}`);
         throw new Error(`SAP iFlow returned ${res.status}${text ? ` — ${text.slice(0, 160)}` : ''}`);
       }
-      const norm = this.normalize(await res.json());
-      return { records: norm.records, dataSource: norm.dataSource ?? 'sap-iflow', mode: 'iflow' };
+      const norm = await this.readBody(res);
+      const records = fixed ? this.applyClientSide(norm.records, q) : norm.records;
+      return { records, dataSource: norm.dataSource ?? 'sap-iflow', mode: 'iflow' };
     }
 
     // Direct S/4HANA / Business Accelerator Hub OData (no iFlow registered).
@@ -186,7 +305,7 @@ export class SapIflowClient {
         const text = await res.text().catch(() => '');
         throw new Error(`SAP returned ${res.status}${text ? ` — ${text.slice(0, 160)}` : ''}`);
       }
-      const norm = this.normalize(await res.json());
+      const norm = await this.readBody(res);
       return { records: norm.records, dataSource: 'sap-s4hana', mode: 's4hana' };
     }
 

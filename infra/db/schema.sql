@@ -367,3 +367,16 @@ CREATE TABLE IF NOT EXISTS connections (
   updated_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_connections_kind ON connections (kind, active);
+
+-- Material Stock: the first live customer iFlow (/http/materialstockread) serves
+-- API_MATERIAL_STOCK_SRV. Field names match the iFlow's XML output.
+INSERT INTO business_objects
+  (org_id, object_code, object_name, keywords, odata_service_path, entity_set,
+   default_filters, select_fields, status_field, group_by, api_version, top_limit, is_active, created_by)
+SELECT NULL, 'MATERIAL_STOCK', 'Material Stock',
+  'stock, material stock, inventory, on hand, on-hand, warehouse stock, batch stock',
+  '/sap/opu/odata/sap/API_MATERIAL_STOCK_SRV', 'A_MatlStkInAcctMod',
+  'Plant eq ''{warehouseId}''',
+  'Material,Plant,StorageLocation,Batch,MatlWrhsStkQtyInMatlBaseUnit,MaterialBaseUnit,InventoryStockType',
+  'InventoryStockType', 'Plant,StorageLocation', 'v2', 50, true, 'seed'
+WHERE NOT EXISTS (SELECT 1 FROM business_objects WHERE object_code = 'MATERIAL_STOCK' AND org_id IS NULL);

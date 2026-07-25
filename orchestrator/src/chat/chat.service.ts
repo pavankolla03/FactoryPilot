@@ -1559,6 +1559,40 @@ export class ChatService {
       }
     }
 
+    // Live SAP material stock via the Business Object registry — grounded, so it
+    // works even when the LLM is unavailable (the data is read, not generated).
+    if ((lower.includes('stock') || lower.includes('inventory')) && !materialId) {
+      try {
+        const objects = await this.businessObjects.activeObjects(user);
+        if (objects.some((o) => o.code === 'MATERIAL_STOCK')) {
+          if (warehouseId) {
+            this.assertScope(user, warehouseId, 'read');
+          }
+          const result = await this.businessObjects.query(user, {
+            objectCode: 'MATERIAL_STOCK',
+            warehouseId,
+            top: 15,
+          });
+          const rows = result.records as Array<Record<string, unknown>>;
+          if (rows.length) {
+            const header = `**${result.objectName}**${warehouseId ? ` — plant ${warehouseId}` : ''} · ${rows.length} row(s) from \`${result.dataSource}\`\n\n`;
+            const table =
+              '| Material | Storage location | Qty | Unit | Batch |\n|---|---|---|---|---|\n' +
+              rows
+                .slice(0, 15)
+                .map(
+                  (r) =>
+                    `| ${r.Material ?? '—'} | ${r.StorageLocation ?? '—'} | ${r.MatlWrhsStkQtyInMatlBaseUnit ?? '—'} | ${r.MaterialBaseUnit ?? '—'} | ${r.Batch || '—'} |`,
+                )
+                .join('\n');
+            return this.emitFallbackText(user, convId, message, start, header + table, ['queryBusinessObject']);
+          }
+        }
+      } catch {
+        /* fall through to the generic paths */
+      }
+    }
+
     if (lower.includes('carbon') || lower.includes('emission') || lower.includes('esg') || lower.includes('sustainab') || lower.includes('footprint')) {
       try {
         const r = await this.esg.report(user);

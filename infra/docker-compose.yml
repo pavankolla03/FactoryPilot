@@ -111,6 +111,8 @@ services:
       REDIS_URL: redis://redis:6379
       CACHE_TTL_SECONDS: 8640000
       IFLOW_BASE_URL: ${IFLOW_BASE_URL:-http://iflow-simulator:4000}
+      # Real SAP payloads are larger than mock; free-tier models need headroom.
+      LLM_ROUND_TIMEOUT_MS: ${LLM_ROUND_TIMEOUT_MS:-90000}
       # Real SAP Integration Suite iFlow (Phase W). Leave SAP_IFLOW_URL empty to use
       # the local simulator; set it to your iFlow HTTPS endpoint to go live.
       SAP_IFLOW_URL: ${SAP_IFLOW_URL:-}
