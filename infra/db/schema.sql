@@ -348,3 +348,22 @@ CREATE TABLE IF NOT EXISTS warehouse_health (
   computed_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_warehouse_health ON warehouse_health (warehouse_id, computed_at DESC);
+
+-- Phase AD: Connection Center. One row per registered customer system. Secrets are
+-- AES-256-GCM sealed (secret-box) so a DB dump never exposes credentials; config
+-- holds only non-secret fields. kind = 'iflow' | 's4hana' | 'btp'.
+CREATE TABLE IF NOT EXISTS connections (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  org_id UUID,
+  kind TEXT NOT NULL,
+  name TEXT NOT NULL,
+  config JSONB NOT NULL DEFAULT '{}'::jsonb,
+  secrets_enc TEXT,
+  active BOOLEAN NOT NULL DEFAULT true,
+  status TEXT NOT NULL DEFAULT 'unknown',
+  last_message TEXT,
+  last_tested_at TIMESTAMP,
+  created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_connections_kind ON connections (kind, active);

@@ -3,7 +3,8 @@ import { DbService } from '../common/db.service';
 import type { AuthUser } from '../common/types';
 import { validationError } from '../common/errors';
 import { contextualize, type BusinessObjectSummary } from './business-object-context';
-import { SapIflowClient } from './sap-iflow.client';
+import { SapIflowClient, type IflowOverride } from './sap-iflow.client';
+import { ConnectionsService } from '../connections/connections.service';
 
 export interface BusinessObjectRow {
   id: string;
@@ -52,7 +53,26 @@ export class BusinessObjectsService {
   private readonly logger = new Logger(BusinessObjectsService.name);
   private readonly iflow = new SapIflowClient();
 
-  constructor(private readonly db: DbService) {}
+  constructor(
+    private readonly db: DbService,
+    private readonly connections: ConnectionsService,
+  ) {}
+
+  /**
+   * Live landscape wins over mock (Phase AD): an active iFlow connection first,
+   * else an active S/4HANA/BAH connection, else env vars, else the simulator.
+   */
+  private async resolveLandscape(orgId?: string | null): Promise<IflowOverride | undefined> {
+    const iflow = await this.connections.resolveActive('iflow', orgId);
+    if (iflow?.url) {
+      return iflow as IflowOverride;
+    }
+    const s4 = await this.connections.resolveActive('s4hana', orgId);
+    if (s4?.baseUrl) {
+      return s4 as IflowOverride;
+    }
+    return undefined;
+  }
 
   /** Rows visible to a user: global templates (org_id NULL) plus their org's. */
   async list(user: AuthUser): Promise<BusinessObjectRow[]> {
@@ -180,7 +200,8 @@ export class BusinessObjectsService {
     if (!row) {
       validationError('business object not found');
     }
-    return this.iflow.testConnection(row!.odata_service_path, row!.entity_set);
+    const landscape = await this.resolveLandscape(user.orgId);
+    return this.iflow.testConnection(row!.odata_service_path, row!.entity_set, landscape);
   }
 
   /** Format a date-equality clause per OData version (v2 needs a datetime literal). */
@@ -225,16 +246,20 @@ export class BusinessObjectsService {
 
     let result: Awaited<ReturnType<SapIflowClient['query']>>;
     try {
-      result = await this.iflow.query({
-        service: cfg.odata_service_path,
-        entitySet: cfg.entity_set,
-        filter: clauses.length ? clauses.join(' and ') : undefined,
-        select: cfg.select_fields || undefined,
-        top: Math.min(args.top || cfg.top_limit, 200),
-        objectCode: cfg.object_code,
-        warehouseId: args.warehouseId,
-        todayOnly: args.todayOnly,
-      });
+      const landscape = await this.resolveLandscape(user.orgId);
+      result = await this.iflow.query(
+        {
+          service: cfg.odata_service_path,
+          entitySet: cfg.entity_set,
+          filter: clauses.length ? clauses.join(' and ') : undefined,
+          select: cfg.select_fields || undefined,
+          top: Math.min(args.top || cfg.top_limit, 200),
+          objectCode: cfg.object_code,
+          warehouseId: args.warehouseId,
+          todayOnly: args.todayOnly,
+        },
+        landscape,
+      );
     } catch (error) {
       validationError(error instanceof Error ? error.message : 'business object query failed');
     }

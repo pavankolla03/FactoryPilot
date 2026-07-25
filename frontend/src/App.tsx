@@ -24,6 +24,7 @@ import { ActivityPage } from './components/ActivityPage';
 import { UsersPage, type AdminUser, type WarehousePolicy } from './components/UsersPage';
 import { CachePoliciesCard } from './components/CachePoliciesCard';
 import { BusinessObjectsCard } from './components/BusinessObjectsCard';
+import { ConnectionsCard } from './components/ConnectionsCard';
 import { WarehouseHealthCard } from './components/WarehouseHealthCard';
 import { SuppliersCard } from './components/SuppliersCard';
 import { SlottingCard } from './components/SlottingCard';
@@ -798,6 +799,7 @@ function App() {
             }
             cachePoliciesSlot={
               <>
+                <ConnectionsCard client={client} onSaved={showToast} />
                 <BusinessObjectsCard client={client} onSaved={showToast} />
                 <CachePoliciesCard client={client} onSaved={showToast} />
               </>

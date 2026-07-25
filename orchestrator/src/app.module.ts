@@ -24,6 +24,8 @@ import { ScenarioController } from './scenario/scenario.controller';
 import { ScenarioService } from './scenario/scenario.service';
 import { StockoutController } from './stockout/stockout.controller';
 import { StockoutService } from './stockout/stockout.service';
+import { ConnectionsController } from './connections/connections.controller';
+import { ConnectionsService } from './connections/connections.service';
 import { EsgController } from './esg/esg.controller';
 import { EsgService } from './esg/esg.service';
 import { DbService } from './common/db.service';
@@ -50,6 +52,7 @@ import { RealtimeGateway } from './realtime/realtime.gateway';
     ScenarioController,
     StockoutController,
     EsgController,
+    ConnectionsController,
   ],
   providers: [
     DbService,
@@ -68,6 +71,7 @@ import { RealtimeGateway } from './realtime/realtime.gateway';
     ScenarioService,
     StockoutService,
     EsgService,
+    ConnectionsService,
   ],
 })
 export class AppModule {}
