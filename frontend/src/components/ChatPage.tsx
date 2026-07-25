@@ -11,6 +11,8 @@ export type AgentStep = {
   args?: Record<string, unknown>;
   ms?: number;
   cacheHit?: boolean;
+  dataSource?: string;
+  live?: boolean;
   status: 'running' | 'ok' | 'error' | 'pending';
 };
 
@@ -20,7 +22,22 @@ export type TurnStats = {
   toolCount: number;
   model: string;
   tokens: number;
+  provenance?: 'live' | 'simulator' | 'mixed' | 'none';
 };
+
+/** Says plainly whether an answer came from the customer's SAP or the simulator. */
+export function ProvenanceChip({ provenance }: { provenance?: TurnStats['provenance'] }) {
+  if (!provenance || provenance === 'none') {
+    return null;
+  }
+  if (provenance === 'live') {
+    return <span className="chip bg-fp-good-soft text-fp-good">● Live from SAP iFlow</span>;
+  }
+  if (provenance === 'mixed') {
+    return <span className="chip bg-fp-accent-soft text-fp-accent-dark">◐ Partly live SAP</span>;
+  }
+  return <span className="chip bg-fp-warn-soft text-fp-warn">○ Simulated data</span>;
+}
 
 export type ChatTurn = {
   role: 'user' | 'assistant';
@@ -179,6 +196,7 @@ export function ChatPage({
                     {turn.source && (
                       <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
                         <SourceChip source={turn.source} />
+                        <ProvenanceChip provenance={turn.stats?.provenance} />
                         {turn.grounded === true && (
                           <span className="chip bg-fp-good-soft text-fp-good">Grounded in tool data</span>
                         )}
@@ -316,6 +334,8 @@ function StepRow({ step, showArgs }: { step: AgentStep; showArgs?: boolean }) {
         <span className="font-medium text-[#3D3C36]">{prettyToolName(step.tool)}</span>
         <span className="activity-chip">{SERVER_LABEL[step.server] || step.server}</span>
         {step.cacheHit && <span className="activity-chip text-fp-accent">cache</span>}
+        {step.live === true && <span className="activity-chip text-fp-good" title={step.dataSource}>live SAP</span>}
+        {step.live === false && <span className="activity-chip text-fp-warn" title={step.dataSource}>sim</span>}
         <span className="ml-auto shrink-0 text-[11px] tabular-nums text-[#A5A294]">
           {step.status === 'running'
             ? 'running…'

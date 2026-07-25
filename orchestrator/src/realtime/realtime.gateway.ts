@@ -16,6 +16,10 @@ export type ChatToolEvent = {
   args?: Record<string, unknown>;
   ms?: number;
   cacheHit?: boolean;
+  /** Which system actually answered: 'sap-iflow (live)', 'simulator', … */
+  dataSource?: string;
+  /** True when the record came from the customer's connected SAP landscape. */
+  live?: boolean;
   status: 'ok' | 'error' | 'pending';
 };
 
@@ -25,6 +29,8 @@ export type ChatTurnStats = {
   toolCount: number;
   model: string;
   tokens: number;
+  /** Turn-level data provenance across all tools used. */
+  provenance?: 'live' | 'simulator' | 'mixed' | 'none';
 };
 
 export type ChatStatusPayload = {

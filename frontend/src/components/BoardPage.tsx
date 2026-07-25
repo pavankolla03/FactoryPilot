@@ -154,8 +154,17 @@ export function BoardPage({
         </div>
         <div className="flex items-center gap-2 text-xs text-fp-ink-3">
           {dataSource && (
-            <span className="chip bg-fp-accent-soft text-fp-accent-dark">
-              {dataSource === 'sap-sandbox' ? 'Live SAP sandbox' : dataSource}
+            <span
+              className={`chip ${
+                /simulator/i.test(dataSource) ? 'bg-fp-warn-soft text-fp-warn' : 'bg-fp-good-soft text-fp-good'
+              }`}
+              title={dataSource}
+            >
+              {/simulator/i.test(dataSource)
+                ? '○ Simulated data'
+                : dataSource === 'sap-sandbox'
+                  ? '● Live SAP sandbox'
+                  : '● Live from SAP iFlow'}
             </span>
           )}
           <span>Drag a card to another location to propose a stock move.</span>
