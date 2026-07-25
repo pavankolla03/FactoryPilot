@@ -1,8 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { McpService } from '../mcp/mcp.service';
 import type { AuthUser } from '../common/types';
+import { LandscapeService } from '../live/landscape.service';
 
-const WAREHOUSES = ['1010', '1020', '1030', '1040', '1050'];
 
 export interface SupplierScorecard {
   supplierId: string | null;
@@ -30,16 +30,15 @@ type Rec = Record<string, unknown>;
 export class SuppliersService {
   private readonly logger = new Logger(SuppliersService.name);
 
-  constructor(private readonly mcp: McpService) {}
+  constructor(private readonly mcp: McpService,
+    private readonly landscape: LandscapeService,) {}
 
   private records(result: unknown): Rec[] {
     return ((result as { structuredContent?: { records?: Rec[] } })?.structuredContent?.records ?? []) as Rec[];
   }
 
-  private scopedWarehouses(user: AuthUser): string[] {
-    if (user.role === 'admin') return WAREHOUSES;
-    const set = new Set(user.scopes.map((s) => s.warehouseId));
-    return WAREHOUSES.filter((w) => set.has(w));
+  private async scopedWarehouses(user: AuthUser): Promise<string[]> {
+    return this.landscape.scopedWarehouseIds(user);
   }
 
   private bandOf(score: number): SupplierScorecard['band'] {
@@ -57,7 +56,7 @@ export class SuppliersService {
 
     // All POs across in-scope warehouses (dedup by poNumber).
     const poByNumber = new Map<string, Rec>();
-    for (const wh of this.scopedWarehouses(user)) {
+    for (const wh of await this.scopedWarehouses(user)) {
       const pos = this.records(await this.mcp.callTool('getPurchaseOrders', { warehouseId: wh }).catch(() => null));
       for (const po of pos) poByNumber.set(String(po.poNumber ?? Math.random()), po);
     }

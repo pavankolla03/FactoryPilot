@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { AxiosInstance } from 'axios';
+import { usePlants, plantLabel } from '../usePlants';
 
 type Material = {
   materialId: string;
@@ -19,7 +20,6 @@ type Result = {
   materials: Material[];
 };
 
-const WAREHOUSES = ['1010', '1020', '1030', '1040', '1050'];
 
 function Slider({
   label,
@@ -59,6 +59,7 @@ function Slider({
  * demand shock and supplier delay, with a baseline comparison. Zero writes.
  */
 export function ScenarioStudioCard({ client }: { client: AxiosInstance }) {
+  const plants = usePlants(client);
   const [warehouseId, setWarehouseId] = useState('1010');
   const [demand, setDemand] = useState(2.5);
   const [horizon, setHorizon] = useState(30);
@@ -116,9 +117,9 @@ export function ScenarioStudioCard({ client }: { client: AxiosInstance }) {
           value={warehouseId}
           onChange={(e) => setWarehouseId(e.target.value)}
         >
-          {WAREHOUSES.map((w) => (
-            <option key={w} value={w}>
-              WH {w}
+          {plants.map((p) => (
+            <option key={p.warehouseId} value={p.warehouseId}>
+              {plantLabel(p)}
             </option>
           ))}
         </select>

@@ -1,8 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { McpService } from '../mcp/mcp.service';
 import type { AuthUser } from '../common/types';
+import { LandscapeService } from '../live/landscape.service';
 
-const WAREHOUSES = ['1010', '1020', '1030', '1040', '1050'];
 
 // Illustrative activity-based emission factors (kg CO2e). Documented as estimates;
 // a real deployment plugs in the customer's own factors / SAP sustainability data.
@@ -61,16 +61,15 @@ type Rec = Record<string, unknown>;
 export class EsgService {
   private readonly logger = new Logger(EsgService.name);
 
-  constructor(private readonly mcp: McpService) {}
+  constructor(private readonly mcp: McpService,
+    private readonly landscape: LandscapeService,) {}
 
   private records(result: unknown): Rec[] {
     return ((result as { structuredContent?: { records?: Rec[] } })?.structuredContent?.records ?? []) as Rec[];
   }
 
-  private scopedWarehouses(user: AuthUser): string[] {
-    if (user.role === 'admin') return WAREHOUSES;
-    const set = new Set(user.scopes.map((s) => s.warehouseId));
-    return WAREHOUSES.filter((w) => set.has(w));
+  private async scopedWarehouses(user: AuthUser): Promise<string[]> {
+    return this.landscape.scopedWarehouseIds(user);
   }
 
   async report(user: AuthUser): Promise<EsgReport> {
@@ -85,7 +84,7 @@ export class EsgService {
     const trendByDay = new Map<string, number>();
 
     const per = await Promise.all(
-      this.scopedWarehouses(user).map(async (warehouseId) => {
+      (await this.scopedWarehouses(user)).map(async (warehouseId) => {
         const [trendRes, poRes] = await Promise.all([
           this.mcp.callTool('getDemandTrend', { warehouseId, days: 30 }).catch(() => null),
           this.mcp.callTool('getPurchaseOrders', { warehouseId }).catch(() => null),

@@ -6,8 +6,8 @@ import { RedisService } from '../common/redis.service';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
 import { holtForecast, reorderPoint, toDailySeries } from '../agents/forecast';
 import type { AuthUser } from '../common/types';
+import { LandscapeService } from '../live/landscape.service';
 
-const WAREHOUSES = ['1010', '1020', '1030', '1040', '1050'];
 const DEFAULT_LEAD_DAYS = 10;
 const HORIZON_DAYS = 30; // only surface risks within this window
 
@@ -42,16 +42,15 @@ export class StockoutService {
     private readonly db: DbService,
     private readonly redis: RedisService,
     private readonly realtime: RealtimeGateway,
+    private readonly landscape: LandscapeService,
   ) {}
 
   private records(result: unknown): Rec[] {
     return ((result as { structuredContent?: { records?: Rec[] } })?.structuredContent?.records ?? []) as Rec[];
   }
 
-  private scopedWarehouses(user: AuthUser): string[] {
-    if (user.role === 'admin') return WAREHOUSES;
-    const set = new Set(user.scopes.map((s) => s.warehouseId));
-    return WAREHOUSES.filter((w) => set.has(w));
+  private async scopedWarehouses(user: AuthUser): Promise<string[]> {
+    return this.landscape.scopedWarehouseIds(user);
   }
 
   /** Compute the risk list for a single warehouse. */
@@ -145,7 +144,7 @@ export class StockoutService {
 
   /** Ranked radar across a user's in-scope warehouses (soonest, uncovered first). */
   async radar(user: AuthUser): Promise<{ risks: StockoutRisk[]; summary: { critical: number; high: number; uncovered: number } }> {
-    const perWarehouse = await Promise.all(this.scopedWarehouses(user).map((wh) => this.warehouseRisks(wh)));
+    const perWarehouse = await Promise.all((await this.scopedWarehouses(user)).map((wh) => this.warehouseRisks(wh)));
     const all: StockoutRisk[] = perWarehouse.flat();
     all.sort((a, b) => Number(a.covered) - Number(b.covered) || a.daysToStockout - b.daysToStockout);
     return {
@@ -165,7 +164,7 @@ export class StockoutService {
   @Cron('0 */4 * * *')
   async scheduledScan() {
     try {
-      for (const wh of WAREHOUSES) {
+      for (const wh of await this.landscape.warehouseIds()) {
         const risks = (await this.warehouseRisks(wh)).filter((r) => r.severity === 'critical' && !r.covered);
         for (const r of risks) {
           const key = `radar:notified:${wh}:${r.materialId}:${new Date().toISOString().slice(0, 10)}`;

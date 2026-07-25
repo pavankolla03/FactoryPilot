@@ -27,6 +27,8 @@ import { StockoutService } from './stockout/stockout.service';
 import { ConnectionsController } from './connections/connections.controller';
 import { ConnectionsService } from './connections/connections.service';
 import { LiveDataService } from './live/live-data.service';
+import { LandscapeService } from './live/landscape.service';
+import { LandscapeController } from './live/landscape.controller';
 import { EsgController } from './esg/esg.controller';
 import { EsgService } from './esg/esg.service';
 import { DbService } from './common/db.service';
@@ -54,6 +56,7 @@ import { RealtimeGateway } from './realtime/realtime.gateway';
     StockoutController,
     EsgController,
     ConnectionsController,
+    LandscapeController,
   ],
   providers: [
     DbService,
@@ -74,6 +77,7 @@ import { RealtimeGateway } from './realtime/realtime.gateway';
     EsgService,
     ConnectionsService,
     LiveDataService,
+    LandscapeService,
   ],
 })
 export class AppModule {}

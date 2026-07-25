@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { AxiosInstance } from 'axios';
 import { Icon, paths } from './ui';
+import { usePlants, plantLabel } from '../usePlants';
 
 type StockCard = {
   materialId: string;
@@ -21,7 +22,6 @@ const LOCATION_COLORS: Record<string, { bar: string; text: string; soft: string 
   shipping: { bar: '#D95926', text: '#C24E20', soft: 'rgba(235,104,52,0.09)' },
 };
 const DEFAULT_COLOR = { bar: '#8B99AD', text: '#47586E', soft: 'rgba(139,153,173,0.10)' };
-const WAREHOUSES = ['1010', '1020', '1030', '1040', '1050'];
 
 export function BoardPage({
   client,
@@ -30,6 +30,7 @@ export function BoardPage({
   client: AxiosInstance;
   onProposed: (message: string) => void;
 }) {
+  const plants = usePlants(client);
   const [warehouseId, setWarehouseId] = useState('1010');
   const [records, setRecords] = useState<StockCard[]>([]);
   const [dataSource, setDataSource] = useState('');
@@ -141,9 +142,10 @@ export function BoardPage({
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-2">
           <select className="input !w-40 py-2 text-sm" value={warehouseId} onChange={(e) => setWarehouseId(e.target.value)}>
-            {WAREHOUSES.map((w) => (
-              <option key={w} value={w}>
-                Warehouse {w}
+            {plants.map((p) => (
+              <option key={p.warehouseId} value={p.warehouseId}>
+                Warehouse {p.warehouseId}
+                {p.live ? ' · live' : ''}
               </option>
             ))}
           </select>

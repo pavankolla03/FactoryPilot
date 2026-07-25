@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { AxiosInstance } from 'axios';
 import { Icon, paths } from './ui';
+import { usePlants, plantLabel } from '../usePlants';
 
 type Proposal = {
   productId: string;
@@ -12,7 +13,6 @@ type Proposal = {
   rationale: string;
 };
 
-const WAREHOUSES = ['1010', '1020', '1030', '1040', '1050'];
 
 /**
  * Slotting optimizer (Phase Z): pick-frequency relocation proposals. "Propose
@@ -27,6 +27,7 @@ export function SlottingCard({
   onToast: (msg: string) => void;
   onExplain: (warehouseId: string) => void;
 }) {
+  const plants = usePlants(client);
   const [warehouseId, setWarehouseId] = useState('1010');
   const [rows, setRows] = useState<Proposal[] | null>(null);
   const [error, setError] = useState(false);
@@ -90,9 +91,9 @@ export function SlottingCard({
             value={warehouseId}
             onChange={(e) => setWarehouseId(e.target.value)}
           >
-            {WAREHOUSES.map((w) => (
-              <option key={w} value={w}>
-                WH {w}
+            {plants.map((p) => (
+              <option key={p.warehouseId} value={p.warehouseId}>
+                {plantLabel(p)}
               </option>
             ))}
           </select>

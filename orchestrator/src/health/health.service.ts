@@ -2,9 +2,9 @@ import { Injectable, Logger } from '@nestjs/common';
 import { DbService } from '../common/db.service';
 import { McpService } from '../mcp/mcp.service';
 import type { AuthUser } from '../common/types';
+import { LandscapeService } from '../live/landscape.service';
 import { holtForecast, toDailySeries } from '../agents/forecast';
 
-const WAREHOUSES = ['1010', '1020', '1030', '1040', '1050'];
 const LOW_THRESHOLD = 50;
 const COVER_DAYS_TARGET = 3; // days-of-demand below this is "at risk"
 
@@ -41,6 +41,7 @@ export class HealthService {
   constructor(
     private readonly db: DbService,
     private readonly mcp: McpService,
+    private readonly landscape: LandscapeService,
   ) {}
 
   private records(result: unknown): Rec[] {
@@ -151,15 +152,13 @@ export class HealthService {
   }
 
   /** Warehouses a user may see (admins: all; others: their read scopes). */
-  private scopedWarehouses(user: AuthUser): string[] {
-    if (user.role === 'admin') return WAREHOUSES;
-    const set = new Set(user.scopes.map((s) => s.warehouseId));
-    return WAREHOUSES.filter((w) => set.has(w));
+  private async scopedWarehouses(user: AuthUser): Promise<string[]> {
+    return this.landscape.scopedWarehouseIds(user);
   }
 
   /** Score for every in-scope warehouse, with trend vs the last stored snapshot. */
   async overview(user: AuthUser): Promise<WarehouseHealth[]> {
-    const warehouses = this.scopedWarehouses(user);
+    const warehouses = await this.scopedWarehouses(user);
     const out: WarehouseHealth[] = [];
     for (const wh of warehouses) {
       const health = await this.computeOne(wh);
