@@ -62,8 +62,13 @@ export class BusinessObjectsService {
    * Live landscape wins over mock (Phase AD): an active iFlow connection first,
    * else an active S/4HANA/BAH connection, else env vars, else the simulator.
    */
-  private async resolveLandscape(orgId?: string | null): Promise<IflowOverride | undefined> {
-    const iflow = await this.connections.resolveActive('iflow', orgId);
+  private async resolveLandscape(orgId?: string | null, entitySet?: string): Promise<IflowOverride | undefined> {
+    // With several fixed-endpoint iFlows registered, pick the one bound to this
+    // object's entity set — otherwise a Sales Order query would be answered by
+    // the material-stock endpoint.
+    const iflow = entitySet
+      ? await this.connections.resolveForEntitySet(entitySet, orgId)
+      : await this.connections.resolveActive('iflow', orgId);
     if (iflow?.url) {
       return iflow as IflowOverride;
     }
@@ -200,7 +205,7 @@ export class BusinessObjectsService {
     if (!row) {
       validationError('business object not found');
     }
-    const landscape = await this.resolveLandscape(user.orgId);
+    const landscape = await this.resolveLandscape(user.orgId, row!.entity_set);
     return this.iflow.testConnection(row!.odata_service_path, row!.entity_set, landscape);
   }
 
@@ -246,7 +251,7 @@ export class BusinessObjectsService {
 
     let result: Awaited<ReturnType<SapIflowClient['query']>>;
     try {
-      const landscape = await this.resolveLandscape(user.orgId);
+      const landscape = await this.resolveLandscape(user.orgId, cfg.entity_set);
       result = await this.iflow.query(
         {
           service: cfg.odata_service_path,

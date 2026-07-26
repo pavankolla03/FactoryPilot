@@ -99,11 +99,10 @@ export class LandscapeService {
     // A fixed-endpoint iFlow serves exactly ONE entity set — every other object
     // routed through it would come back with the wrong payload, so only the
     // object it actually serves may be called live.
-    const conn = await this.connections.resolveActive('iflow', orgId);
-    const fixed = conn?.fixedEndpoint === true || conn?.fixedEndpoint === 'true';
-    const servedEntitySet = fixed ? String(conn?.probeEntitySet ?? '') : '';
+    const served = await this.connections.servedEntitySets(orgId);
     const servesObject = (entitySet: string | null) =>
-      connected && (!fixed || (entitySet ?? '') === servedEntitySet);
+      connected && (served.hasGeneric || served.fixed.includes(entitySet ?? ''));
+    const servedList = served.fixed.join(', ') || 'one entity set';
 
     const objects = [
       {
@@ -124,7 +123,7 @@ export class LandscapeService {
             ? 'Simulator'
             : servesObject(r.entity_set)
               ? 'Queried through the connected iFlow'
-              : `Simulator — the connected iFlow only serves ${servedEntitySet || 'one entity set'}`,
+              : `Simulator — the connected iFlow(s) serve ${servedList}`,
         })),
     ];
 

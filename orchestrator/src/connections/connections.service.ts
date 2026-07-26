@@ -180,6 +180,71 @@ export class ConnectionsService {
     }
   }
 
+  /**
+   * Pick the read connection that actually serves an entity set (Phase AI).
+   * A fixed-endpoint iFlow answers for exactly one entity set, so with several
+   * registered we must route per object instead of using "the" iFlow. A generic
+   * (non-fixed) iFlow can serve anything and is the fallback.
+   */
+  async resolveForEntitySet(entitySet: string, orgId?: string | null): Promise<ResolvedConnection | null> {
+    try {
+      const rows = await this.db.query<ConnectionRow>(
+        `SELECT * FROM connections WHERE kind = 'iflow' AND active = true
+           AND (org_id IS NOT DISTINCT FROM $1 OR org_id IS NULL)
+         ORDER BY (org_id IS NOT NULL) DESC, updated_at DESC`,
+        [orgId ?? null],
+      );
+      const candidates = rows.rows.length
+        ? rows.rows
+        : (await this.db.query<ConnectionRow>("SELECT * FROM connections WHERE kind = 'iflow' AND active = true")).rows;
+
+      const open = (row: ConnectionRow): ResolvedConnection => {
+        const secrets = row.secrets_enc ? (JSON.parse(openSecret(row.secrets_enc)) as Record<string, string>) : {};
+        return { id: row.id, name: row.name, kind: row.kind, ...row.config, ...secrets };
+      };
+      const isFixed = (row: ConnectionRow) =>
+        row.config.fixedEndpoint === true || row.config.fixedEndpoint === 'true';
+
+      // 1) a fixed endpoint bound to exactly this entity set
+      const exact = candidates.find((r) => isFixed(r) && String(r.config.probeEntitySet ?? '') === entitySet);
+      if (exact) return open(exact);
+      // 2) a generic endpoint that can serve any object
+      const generic = candidates.find((r) => !isFixed(r));
+      if (generic) return open(generic);
+      return null;
+    } catch (error) {
+      this.logger.warn(`resolveForEntitySet(${entitySet}) failed: ${error instanceof Error ? error.message : 'unknown'}`);
+      return null;
+    }
+  }
+
+  /** Entity sets currently served by an active fixed-endpoint iFlow. */
+  async servedEntitySets(orgId?: string | null): Promise<{ fixed: string[]; hasGeneric: boolean }> {
+    try {
+      const rows = await this.db.query<ConnectionRow>(
+        `SELECT * FROM connections WHERE kind = 'iflow' AND active = true
+           AND (org_id IS NOT DISTINCT FROM $1 OR org_id IS NULL)`,
+        [orgId ?? null],
+      );
+      const all = rows.rows.length
+        ? rows.rows
+        : (await this.db.query<ConnectionRow>("SELECT * FROM connections WHERE kind = 'iflow' AND active = true")).rows;
+      const fixed: string[] = [];
+      let hasGeneric = false;
+      for (const r of all) {
+        if (r.config.fixedEndpoint === true || r.config.fixedEndpoint === 'true') {
+          const es = String(r.config.probeEntitySet ?? '');
+          if (es) fixed.push(es);
+        } else {
+          hasGeneric = true;
+        }
+      }
+      return { fixed, hasGeneric };
+    } catch {
+      return { fixed: [], hasGeneric: false };
+    }
+  }
+
   /** Live probe per system type; records status + message on the row. */
   async test(user: AuthUser, id: string): Promise<{ ok: boolean; message: string }> {
     const row = await this.byId(user, id);

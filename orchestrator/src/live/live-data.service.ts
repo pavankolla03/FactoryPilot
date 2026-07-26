@@ -39,8 +39,10 @@ export class LiveDataService {
     return LIVE_TOOLS.has(toolName);
   }
 
-  private async landscape(orgId?: string | null): Promise<IflowOverride | null> {
-    const iflow = await this.connections.resolveActive('iflow', orgId);
+  private async landscape(orgId?: string | null, entitySet?: string): Promise<IflowOverride | null> {
+    const iflow = entitySet
+      ? await this.connections.resolveForEntitySet(entitySet, orgId)
+      : await this.connections.resolveActive('iflow', orgId);
     if (iflow?.url) return iflow as IflowOverride;
     const s4 = await this.connections.resolveActive('s4hana', orgId);
     if (s4?.baseUrl) return s4 as IflowOverride;
@@ -49,9 +51,6 @@ export class LiveDataService {
 
   /** Fetch + normalize live stock once per 60s (the iFlow returns the full plant set). */
   private async liveStock(orgId?: string | null): Promise<StockRow[] | null> {
-    const landscape = await this.landscape(orgId);
-    if (!landscape) return null;
-
     if (this.cache && Date.now() - this.cache.at < 60_000) {
       return this.cache.rows;
     }
@@ -67,6 +66,9 @@ export class LiveDataService {
     );
     const obj = cfg.rows[0];
     if (!obj) return null;
+
+    const landscape = await this.landscape(orgId, obj.entity_set);
+    if (!landscape) return null;
 
     try {
       const result = await this.iflow.query(

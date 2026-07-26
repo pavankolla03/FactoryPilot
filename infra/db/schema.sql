@@ -380,3 +380,16 @@ SELECT NULL, 'MATERIAL_STOCK', 'Material Stock',
   'Material,Plant,StorageLocation,Batch,MatlWrhsStkQtyInMatlBaseUnit,MaterialBaseUnit,InventoryStockType',
   'InventoryStockType', 'Plant,StorageLocation', 'v2', 50, true, 'seed'
 WHERE NOT EXISTS (SELECT 1 FROM business_objects WHERE object_code = 'MATERIAL_STOCK' AND org_id IS NULL);
+
+-- Serial numbers: served by the customer's /http/materialdocument iFlow, which
+-- returns A_SerialNumberMaterialDocument (traceability), not movement lines.
+INSERT INTO business_objects
+  (org_id, object_code, object_name, keywords, odata_service_path, entity_set,
+   default_filters, select_fields, group_by, api_version, top_limit, is_active, created_by)
+SELECT NULL, 'SERIAL_NUMBERS', 'Serial Numbers',
+  'serial number, serial numbers, traceability, material document serial, equipment serial',
+  '/sap/opu/odata/sap/API_MATERIAL_DOCUMENT_SRV', 'A_SerialNumberMaterialDocument',
+  NULL,
+  'MaterialDocument,MaterialDocumentYear,MaterialDocumentItem,Material,SerialNumber',
+  'Material', 'v2', 30, true, 'seed'
+WHERE NOT EXISTS (SELECT 1 FROM business_objects WHERE object_code = 'SERIAL_NUMBERS' AND org_id IS NULL);
