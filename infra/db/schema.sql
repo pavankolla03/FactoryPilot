@@ -393,3 +393,8 @@ SELECT NULL, 'SERIAL_NUMBERS', 'Serial Numbers',
   'MaterialDocument,MaterialDocumentYear,MaterialDocumentItem,Material,SerialNumber',
   'Material', 'v2', 30, true, 'seed'
 WHERE NOT EXISTS (SELECT 1 FROM business_objects WHERE object_code = 'SERIAL_NUMBERS' AND org_id IS NULL);
+
+-- Phase AK: connection health, so an operator can see whether live data is
+-- actually flowing rather than inferring it from a chip.
+ALTER TABLE connections ADD COLUMN IF NOT EXISTS last_success_at TIMESTAMP;
+ALTER TABLE connections ADD COLUMN IF NOT EXISTS consecutive_failures INT NOT NULL DEFAULT 0;

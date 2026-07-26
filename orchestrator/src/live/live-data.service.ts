@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { DbService } from '../common/db.service';
 import { ConnectionsService } from '../connections/connections.service';
+import { RedisService } from '../common/redis.service';
 import { SapIflowClient, type IflowOverride } from '../business-objects/sap-iflow.client';
 
 /** MCP read tools this adapter can serve from live SAP material stock. */
@@ -28,12 +29,22 @@ interface StockRow {
 export class LiveDataService {
   private readonly logger = new Logger(LiveDataService.name);
   private readonly iflow = new SapIflowClient();
-  private cache: { at: number; rows: StockRow[] } | null = null;
+  private cache: { at: number; rows: StockRow[]; fetchedAt: number; degraded: boolean } | null = null;
+
+  /** Survives restarts, so a SAP outage at boot still has something truthful to serve. */
+  private static readonly SNAPSHOT_KEY = 'live:stock:last-known-good';
+  private static readonly SNAPSHOT_TTL_SECONDS = 7 * 24 * 3600;
 
   constructor(
     private readonly db: DbService,
     private readonly connections: ConnectionsService,
+    private readonly redis: RedisService,
   ) {}
+
+  /** How stale the currently served data is, in minutes (0 = fresh). */
+  private staleMinutes(fetchedAt: number): number {
+    return Math.max(0, Math.floor((Date.now() - fetchedAt) / 60_000));
+  }
 
   canServe(toolName: string): boolean {
     return LIVE_TOOLS.has(toolName);
@@ -50,9 +61,11 @@ export class LiveDataService {
   }
 
   /** Fetch + normalize live stock once per 60s (the iFlow returns the full plant set). */
-  private async liveStock(orgId?: string | null): Promise<StockRow[] | null> {
+  private async liveStock(
+    orgId?: string | null,
+  ): Promise<{ rows: StockRow[]; fetchedAt: number; degraded: boolean } | null> {
     if (this.cache && Date.now() - this.cache.at < 60_000) {
-      return this.cache.rows;
+      return { rows: this.cache.rows, fetchedAt: this.cache.fetchedAt, degraded: this.cache.degraded };
     }
 
     const cfg = await this.db.query<{
@@ -89,11 +102,66 @@ export class LiveDataService {
           quantity: Number(r.MatlWrhsStkQtyInMatlBaseUnit ?? r.quantity ?? 0),
         }))
         .filter((r) => r.materialId && r.warehouseId);
-      this.cache = { at: Date.now(), rows };
-      return rows;
+      const fetchedAt = Date.now();
+      this.cache = { at: fetchedAt, rows, fetchedAt, degraded: false };
+      await this.saveSnapshot(rows, fetchedAt);
+      await this.recordHealth(landscape, true);
+      return { rows, fetchedAt, degraded: false };
     } catch (error) {
-      this.logger.warn(`live stock fetch failed: ${error instanceof Error ? error.message : 'unknown'}`);
+      const reason = error instanceof Error ? error.message : 'unknown';
+      this.logger.warn(`live stock fetch failed: ${reason}`);
+      await this.recordHealth(landscape, false, reason);
+
+      // Resilience (Phase AK): serve the last good SAP payload, clearly marked
+      // stale, instead of silently reverting to simulated numbers.
+      const snapshot = await this.loadSnapshot();
+      if (snapshot) {
+        this.logger.warn(`serving last-known-good SAP stock (${this.staleMinutes(snapshot.fetchedAt)}m old)`);
+        this.cache = { at: Date.now(), rows: snapshot.rows, fetchedAt: snapshot.fetchedAt, degraded: true };
+        return { ...snapshot, degraded: true };
+      }
       return null;
+    }
+  }
+
+  private async saveSnapshot(rows: StockRow[], fetchedAt: number) {
+    try {
+      await this.redis.raw.setEx(
+        LiveDataService.SNAPSHOT_KEY,
+        LiveDataService.SNAPSHOT_TTL_SECONDS,
+        JSON.stringify({ fetchedAt, rows }),
+      );
+    } catch {
+      /* snapshot is best-effort */
+    }
+  }
+
+  private async loadSnapshot(): Promise<{ rows: StockRow[]; fetchedAt: number } | null> {
+    try {
+      const raw = await this.redis.raw.get(LiveDataService.SNAPSHOT_KEY);
+      if (!raw) return null;
+      const parsed = JSON.parse(raw) as { fetchedAt: number; rows: StockRow[] };
+      return parsed.rows?.length ? { rows: parsed.rows, fetchedAt: parsed.fetchedAt } : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /** Track whether live data is actually flowing, for the Connections view. */
+  private async recordHealth(landscape: IflowOverride | null, ok: boolean, message?: string) {
+    const id = (landscape as unknown as { id?: string })?.id;
+    if (!id) return;
+    try {
+      await this.db.query(
+        ok
+          ? `UPDATE connections SET last_success_at = NOW(), consecutive_failures = 0,
+               status = 'ok', last_message = 'Live data flowing' WHERE id = $1`
+          : `UPDATE connections SET consecutive_failures = consecutive_failures + 1,
+               status = 'error', last_message = $2 WHERE id = $1`,
+        ok ? [id] : [id, (message ?? 'fetch failed').slice(0, 300)],
+      );
+    } catch {
+      /* health tracking must never break a read */
     }
   }
 
@@ -123,8 +191,9 @@ export class LiveDataService {
   ): Promise<{ structuredContent: Record<string, unknown> } | null> {
     if (!this.canServe(toolName)) return null;
 
-    const all = await this.liveStock(orgId);
-    if (!all) return null;
+    const live = await this.liveStock(orgId);
+    if (!live) return null;
+    const all = live.rows;
 
     const warehouseId = params.warehouseId ? String(params.warehouseId) : undefined;
     const scoped = warehouseId ? all.filter((r) => r.warehouseId === warehouseId) : all;
@@ -132,7 +201,13 @@ export class LiveDataService {
     // pretending the warehouse is empty.
     if (scoped.length === 0) return null;
 
-    const dataSource = 'sap-iflow (live)';
+    // "live" must mean SAP just confirmed it. Once a fetch fails we serve the
+    // last good payload and say so, however recent it is — a reader must never
+    // be told "live" while SAP is unreachable.
+    const staleFor = this.staleMinutes(live.fetchedAt);
+    const dataSource = live.degraded
+      ? `sap-iflow (last known good · ${staleFor}m old · SAP unreachable)`
+      : 'sap-iflow (live)';
 
     if (toolName === 'listWarehouseStock') {
       return { structuredContent: { records: this.aggregate(scoped), dataSource } };
@@ -175,8 +250,8 @@ export class LiveDataService {
 
   /** Plants that actually have live stock — used to show what is connected. */
   async livePlants(orgId?: string | null): Promise<string[]> {
-    const rows = await this.liveStock(orgId);
-    if (!rows) return [];
-    return [...new Set(rows.map((r) => r.warehouseId))].sort();
+    const live = await this.liveStock(orgId);
+    if (!live) return [];
+    return [...new Set(live.rows.map((r) => r.warehouseId))].sort();
   }
 }

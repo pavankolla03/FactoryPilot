@@ -30,7 +30,7 @@ export type ChatTurnStats = {
   model: string;
   tokens: number;
   /** Turn-level data provenance across all tools used. */
-  provenance?: 'live' | 'simulator' | 'mixed' | 'none';
+  provenance?: 'live' | 'stale' | 'simulator' | 'mixed' | 'none';
 };
 
 export type ChatStatusPayload = {

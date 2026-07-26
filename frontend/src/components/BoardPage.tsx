@@ -158,15 +158,19 @@ export function BoardPage({
           {dataSource && (
             <span
               className={`chip ${
-                /simulator/i.test(dataSource) ? 'bg-fp-warn-soft text-fp-warn' : 'bg-fp-good-soft text-fp-good'
+                /simulator/i.test(dataSource) || /last known good/i.test(dataSource)
+                  ? 'bg-fp-warn-soft text-fp-warn'
+                  : 'bg-fp-good-soft text-fp-good'
               }`}
               title={dataSource}
             >
               {/simulator/i.test(dataSource)
                 ? '○ Simulated data'
-                : dataSource === 'sap-sandbox'
-                  ? '● Live SAP sandbox'
-                  : '● Live from SAP iFlow'}
+                : /last known good/i.test(dataSource)
+                  ? `◑ ${dataSource.replace('sap-iflow ', '').replace(/[()]/g, '')}`
+                  : dataSource === 'sap-sandbox'
+                    ? '● Live SAP sandbox'
+                    : '● Live from SAP iFlow'}
             </span>
           )}
           <span>Drag a card to another location to propose a stock move.</span>

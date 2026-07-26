@@ -22,7 +22,7 @@ export type TurnStats = {
   toolCount: number;
   model: string;
   tokens: number;
-  provenance?: 'live' | 'simulator' | 'mixed' | 'none';
+  provenance?: 'live' | 'stale' | 'simulator' | 'mixed' | 'none';
 };
 
 /** Says plainly whether an answer came from the customer's SAP or the simulator. */
@@ -32,6 +32,13 @@ export function ProvenanceChip({ provenance }: { provenance?: TurnStats['provena
   }
   if (provenance === 'live') {
     return <span className="chip bg-fp-good-soft text-fp-good">● Live from SAP iFlow</span>;
+  }
+  if (provenance === 'stale') {
+    return (
+      <span className="chip bg-fp-warn-soft text-fp-warn" title="SAP was unreachable — showing the last payload it confirmed">
+        ◑ Last known good (SAP unreachable)
+      </span>
+    );
   }
   if (provenance === 'mixed') {
     return <span className="chip bg-fp-accent-soft text-fp-accent-dark">◐ Partly live SAP</span>;

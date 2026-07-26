@@ -361,6 +361,7 @@ export class ChatService {
     let payloadBytes = 0;
     let liveHits = 0;
     let simHits = 0;
+    let staleHits = 0;
     const toolMs = () => toolEvents.reduce((sum, e) => sum + (e.ms || 0), 0);
     const statsNow = () => ({
       elapsedMs: Date.now() - start,
@@ -368,11 +369,15 @@ export class ChatService {
       toolCount: invokedTools.length,
       model: lastModelUsed || 'fallback',
       tokens: totalTokens,
-      provenance: (liveHits && simHits ? 'mixed' : liveHits ? 'live' : simHits ? 'simulator' : 'none') as
-        | 'live'
-        | 'simulator'
-        | 'mixed'
-        | 'none',
+      provenance: (staleHits
+        ? 'stale'
+        : liveHits && simHits
+          ? 'mixed'
+          : liveHits
+            ? 'live'
+            : simHits
+              ? 'simulator'
+              : 'none') as 'live' | 'stale' | 'simulator' | 'mixed' | 'none',
     });
 
     const toolDefs = tools.map((t) => ({ name: t.name, description: t.description, inputSchema: t.inputSchema }));
@@ -489,8 +494,11 @@ export class ChatService {
               ((data as { structuredContent?: { dataSource?: unknown } })?.structuredContent?.dataSource ?? '') || '',
             );
             const isLive = /sap-|s4hana|iflow/i.test(ds) && !/simulator/i.test(ds);
+            const isStale = /last known good/i.test(ds);
             if (ds) {
-              isLive ? (liveHits += 1) : (simHits += 1);
+              if (isStale) staleHits += 1;
+              else if (isLive) liveHits += 1;
+              else simHits += 1;
             }
             const event: ChatToolEvent = {
               id: stepId,
