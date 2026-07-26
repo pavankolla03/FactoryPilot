@@ -20,6 +20,7 @@ import { SlottingService } from '../slotting/slotting.service';
 import { StockoutService } from '../stockout/stockout.service';
 import { EsgService } from '../esg/esg.service';
 import { LiveDataService } from '../live/live-data.service';
+import { LiveWriteService } from '../live/live-write.service';
 import { hydrateModelOutcomes, reportModelOutcome } from '../llm/openrouter-provider';
 import { openSecret } from '../common/secret-box';
 import type { UserModelConfig } from '../llm/custom-provider';
@@ -233,6 +234,7 @@ export class ChatService {
     private readonly stockout: StockoutService,
     private readonly esg: EsgService,
     private readonly live: LiveDataService,
+    private readonly liveWrite: LiveWriteService,
   ) {}
 
   async getUsage(userId: string) {
@@ -556,7 +558,7 @@ export class ChatService {
                   args: call.arguments,
                 });
                 const toolStart = Date.now();
-                const result = await this.executeWriteTool(call.name, call.arguments);
+                const result = await this.executeWriteTool(call.name, call.arguments, user.orgId);
                 const event: ChatToolEvent = {
                   id: stepId,
                   tool: call.name,
@@ -798,7 +800,7 @@ export class ChatService {
     const results: Array<Record<string, unknown>> = [];
     for (const [index, step] of steps.entries()) {
       try {
-        results.push(await this.executeWriteTool(step.tool, step.params));
+        results.push(await this.executeWriteTool(step.tool, step.params, user.orgId));
       } catch (error) {
         const reason = error instanceof Error ? error.message : 'tool call failed';
         await this.writeSessionLog({
@@ -872,7 +874,7 @@ export class ChatService {
     const args: Record<string, unknown> = { ...params };
 
     if (!anomaly && !policy.makerChecker && policy.autoMax !== null && params.qty <= policy.autoMax) {
-      const result = await this.executeWriteTool('moveStock', args);
+      const result = await this.executeWriteTool('moveStock', args, user.orgId);
       await this.writeSessionLog({
         userId: user.id,
         conversationId: null,
@@ -969,7 +971,25 @@ export class ChatService {
   }
 
   /** Executes a write tool through MCP and maintains the caches it touches. */
-  private async executeWriteTool(tool: string, params: Record<string, unknown>) {
+  private async executeWriteTool(tool: string, params: Record<string, unknown>, orgId?: string | null) {
+    // Write-back (Phase AH): when a write iFlow is registered the approved action
+    // is posted to SAP; otherwise it falls through to the existing ledger path.
+    // A registered-but-failing endpoint throws rather than silently writing local.
+    const posted = await this.liveWrite.post(tool, params, orgId);
+    if (posted) {
+      if (STOCK_MUTATING_TOOLS.has(tool)) {
+        await this.invalidateWarehouseCache(String(params.warehouseId || 'global'));
+      }
+      return {
+        structuredContent: {
+          success: true,
+          documentNumber: posted.documentNumber,
+          dataSource: posted.dataSource,
+          ...posted.raw,
+        },
+      } as unknown as Record<string, unknown>;
+    }
+
     const result = await this.mcp.callTool(tool, params);
 
     if (STOCK_MUTATING_TOOLS.has(tool)) {

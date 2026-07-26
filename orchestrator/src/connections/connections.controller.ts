@@ -6,7 +6,7 @@ import { scopeDenied } from '../common/errors';
 import { ConnectionsService } from './connections.service';
 
 const createSchema = z.object({
-  kind: z.enum(['iflow', 's4hana', 'btp']),
+  kind: z.enum(['iflow', 'iflow-write', 's4hana', 'btp']),
   name: z.string().min(1),
   config: z.record(z.unknown()).optional(),
   secrets: z.record(z.string()).optional(),

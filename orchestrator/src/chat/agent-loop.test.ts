@@ -16,6 +16,7 @@ import type { SlottingService } from '../slotting/slotting.service';
 import type { StockoutService } from '../stockout/stockout.service';
 import type { EsgService } from '../esg/esg.service';
 import type { LiveDataService } from '../live/live-data.service';
+import type { LiveWriteService } from '../live/live-write.service';
 import type { AuthUser } from '../common/types';
 
 interface StoredMessage {
@@ -177,6 +178,11 @@ function buildFakes() {
     livePlants: async () => [],
   } as unknown as LiveDataService;
 
+  const liveWrite = {
+    canPost: () => false,
+    post: async () => null,
+  } as unknown as LiveWriteService;
+
   const esg = {
     report: async () => ({ warehouses: [], summary: { totalKg: 0, transportKg: 0, handlingKg: 0, intensityKgPerUnit: 0, byMode: [], topSuppliers: [], dailyTrend: [] } }),
   } as unknown as EsgService;
@@ -197,6 +203,7 @@ function buildFakes() {
     stockout,
     esg,
     live,
+    liveWrite,
     providerRounds,
     sessionLogs,
     messages,
@@ -230,6 +237,7 @@ describe('agent loop', () => {
       fakes.stockout,
       fakes.esg,
       fakes.live,
+      fakes.liveWrite,
     );
 
     const response = await service.chat(user, undefined, 'how much MAT-1 in 1010?');
@@ -268,6 +276,7 @@ describe('agent loop', () => {
       fakes.stockout,
       fakes.esg,
       fakes.live,
+      fakes.liveWrite,
     );
 
     await service.chat(user, undefined, 'how much MAT-1 in 1010?');

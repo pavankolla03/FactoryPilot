@@ -5,7 +5,7 @@ import { validationError } from '../common/errors';
 import { SapIflowClient, type IflowOverride } from '../business-objects/sap-iflow.client';
 import type { AuthUser } from '../common/types';
 
-export type ConnectionKind = 'iflow' | 's4hana' | 'btp';
+export type ConnectionKind = 'iflow' | 'iflow-write' | 's4hana' | 'btp';
 
 export interface ConnectionRow {
   id: string;
@@ -30,6 +30,7 @@ export type ResolvedConnection = { id: string; name: string; kind: ConnectionKin
 
 const SECRET_FIELDS: Record<ConnectionKind, string[]> = {
   iflow: ['password', 'apiKey', 'clientSecret'],
+  'iflow-write': ['password', 'apiKey', 'clientSecret'],
   s4hana: ['apiKey', 'password', 'clientSecret'],
   btp: ['clientSecret'],
 };
@@ -76,7 +77,7 @@ export class ConnectionsService {
     user: AuthUser,
     input: { kind: ConnectionKind; name: string; config: Record<string, unknown>; secrets?: Record<string, string> },
   ): Promise<ConnectionView> {
-    if (!['iflow', 's4hana', 'btp'].includes(input.kind)) {
+    if (!['iflow', 'iflow-write', 's4hana', 'btp'].includes(input.kind)) {
       validationError('unknown connection kind');
     }
     const secrets = this.pickSecrets(input.kind, input.secrets ?? {});
@@ -195,7 +196,11 @@ export class ConnectionsService {
           ? await this.testBtp(cfg)
           : row!.kind === 's4hana'
             ? await this.testS4(cfg)
-            : await this.testIflow(cfg);
+            : row!.kind === 'iflow-write'
+              ? // A write endpoint must not be probed with a real posting; just
+                // confirm the URL is reachable and the credentials are accepted.
+                await this.testWriteReachable(cfg)
+              : await this.testIflow(cfg);
     } catch (error) {
       result = { ok: false, message: error instanceof Error ? error.message : 'connection failed' };
     }
@@ -232,6 +237,30 @@ export class ConnectionsService {
       cfg as unknown as IflowOverride,
     );
     return { ok: probe.ok, message: probe.message };
+  }
+
+  /** Write endpoint: confirm reachability + auth without posting a document. */
+  private async testWriteReachable(cfg: Record<string, string>): Promise<{ ok: boolean; message: string }> {
+    if (!cfg.url) {
+      return { ok: false, message: 'endpoint URL is required' };
+    }
+    const res = await fetch(cfg.url, { method: 'OPTIONS', headers: await this.writeAuthHeaders(cfg) }).catch(
+      () => null,
+    );
+    if (!res) {
+      return { ok: false, message: 'endpoint unreachable' };
+    }
+    if (res.status === 401 || res.status === 403) {
+      return { ok: false, message: `credentials rejected (${res.status})` };
+    }
+    return { ok: true, message: `Write endpoint reachable (HTTP ${res.status}) — no document was posted` };
+  }
+
+  private async writeAuthHeaders(cfg: Record<string, string>): Promise<Record<string, string>> {
+    if ((cfg.auth || '').toLowerCase() === 'oauth2' || cfg.tokenUrl) {
+      return { Authorization: `Bearer ${await this.oauthToken(cfg)}` };
+    }
+    return this.authHeaders(cfg);
   }
 
   /** S/4HANA or Business Accelerator Hub: direct OData $top=1 probe. */

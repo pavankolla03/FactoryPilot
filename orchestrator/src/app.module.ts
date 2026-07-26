@@ -28,6 +28,7 @@ import { ConnectionsController } from './connections/connections.controller';
 import { ConnectionsService } from './connections/connections.service';
 import { LiveDataService } from './live/live-data.service';
 import { LandscapeService } from './live/landscape.service';
+import { LiveWriteService } from './live/live-write.service';
 import { LandscapeController } from './live/landscape.controller';
 import { EsgController } from './esg/esg.controller';
 import { EsgService } from './esg/esg.service';
@@ -78,6 +79,7 @@ import { RealtimeGateway } from './realtime/realtime.gateway';
     ConnectionsService,
     LiveDataService,
     LandscapeService,
+    LiveWriteService,
   ],
 })
 export class AppModule {}

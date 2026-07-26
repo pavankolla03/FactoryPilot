@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import type { AxiosInstance } from 'axios';
 import { Icon, paths } from './ui';
 
-type Kind = 'iflow' | 's4hana' | 'btp';
+type Kind = 'iflow' | 'iflow-write' | 's4hana' | 'btp';
 
 type Connection = {
   id: string;
@@ -35,6 +35,21 @@ const KINDS: Record<Kind, { title: string; blurb: string; fields: FieldDef[] }> 
       { key: 'clientSecret', label: 'OAuth2 client secret', secret: true },
       { key: 'probeService', label: 'Test service path', placeholder: '/sap/opu/odata/sap/API_PRODUCT_SRV' },
       { key: 'probeEntitySet', label: 'Test entity set', placeholder: 'A_Product' },
+    ],
+  },
+  'iflow-write': {
+    title: 'SAP iFlow — write-back',
+    blurb:
+      'Optional. When registered, approved writes (stock moves, purchase requisitions, goods receipts) are POSTed to SAP instead of the local ledger. Approvals, anomaly checks and maker-checker are unchanged.',
+    fields: [
+      { key: 'url', label: 'Write endpoint URL', placeholder: 'https://<tenant>.it-cpitrial06-rt.cfapps.<region>.hana.ondemand.com/http/stockmovewrite' },
+      { key: 'auth', label: 'Auth', type: 'select', options: ['oauth2', 'basic', 'apikey', 'none'] },
+      { key: 'tokenUrl', label: 'OAuth2 token URL' },
+      { key: 'clientId', label: 'OAuth2 client id' },
+      { key: 'clientSecret', label: 'OAuth2 client secret', secret: true },
+      { key: 'username', label: 'Username (basic)' },
+      { key: 'password', label: 'Password (basic)', secret: true },
+      { key: 'apiKey', label: 'API key', secret: true },
     ],
   },
   s4hana: {
@@ -163,7 +178,13 @@ export function ConnectionsCard({ client, onSaved }: { client: AxiosInstance; on
               onClick={() => setEditing({ kind: k, values: {}, name: KINDS[k].title })}
             >
               <Icon path={paths.plus} size={11} strokeWidth={2.6} />
-              {k === 'iflow' ? 'iFlow' : k === 's4hana' ? 'S/4HANA' : 'BTP tenant'}
+              {k === 'iflow'
+                ? 'iFlow (read)'
+                : k === 'iflow-write'
+                  ? 'iFlow (write)'
+                  : k === 's4hana'
+                    ? 'S/4HANA'
+                    : 'BTP tenant'}
             </button>
           ))}
         </div>
@@ -186,7 +207,13 @@ export function ConnectionsCard({ client, onSaved }: { client: AxiosInstance; on
             <div className="flex flex-wrap items-center gap-2">
               <span className="text-[13px] font-semibold text-fp-ink">{r.name}</span>
               <span className="chip bg-fp-surface text-fp-ink-2">
-                {r.kind === 'iflow' ? 'iFlow' : r.kind === 's4hana' ? 'S/4HANA' : 'BTP'}
+                {r.kind === 'iflow'
+                  ? 'iFlow read'
+                  : r.kind === 'iflow-write'
+                    ? 'iFlow write'
+                    : r.kind === 's4hana'
+                      ? 'S/4HANA'
+                      : 'BTP'}
               </span>
               <span className={`chip ${STATUS_CHIP[r.status]}`}>{r.status === 'ok' ? 'connected' : r.status}</span>
               {r.active ? (
