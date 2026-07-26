@@ -11,6 +11,23 @@ literal syntax (`datetime'…'` for V2, bare ISO for V4).
 of the analytics fields are present. Please confirm the entity set below when
 building each one.
 
+
+## Quick reference — build in this order
+
+| # | Build | API URL | Entity set to expose | OData |
+|---|---|---|---|---|
+| ✅ | Material Stock *(done)* | https://api.sap.com/api/API_MATERIAL_STOCK_SRV/overview | `A_MatlStkInAcctMod` | V2 |
+| **1** | **Goods movements** ⭐ | https://api.sap.com/api/API_MATERIAL_DOCUMENT_SRV/overview | **`A_MaterialDocumentItem`** | V2 |
+| **2** | **Purchase orders** ⭐ | https://api.sap.com/api/API_PURCHASEORDER_PROCESS_SRV/overview | `A_PurchaseOrderItem` (expand `to_PurchaseOrder`) | V2 |
+| 3 | Physical inventory | https://api.sap.com/api/API_PHYSICAL_INVENTORY_DOC_SRV/overview | `A_PhysInventoryDocItem` | V2 |
+| 4 | Warehouse stock by product | https://api.sap.com/api/API_WHSE_PHYSSTOCKPROD/overview | product/bin stock set | V4 |
+| 5 | Warehouse order & task | https://api.sap.com/api/API_WAREHOUSE_ORDER_TASK_2/overview | warehouse task set | V4 |
+| 6 | Warehouse inbound delivery | https://api.sap.com/api/API_WHSE_INB_DELIVERY_2/overview | inbound delivery item set | V4 |
+| 6 | Warehouse outbound delivery | https://api.sap.com/api/API_WHSE_OUTB_DELIVERY_2/overview | outbound delivery item set | V4 |
+| — | Handling unit *(skip for now)* | https://api.sap.com/api/HANDLINGUNIT_0001/overview | — | V4 |
+
+Full catalogue: https://api.sap.com/products/SAPS4HANACloudPublicEdition/apis
+
 ---
 
 ## Build these two first — they unlock the most
