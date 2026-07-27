@@ -35,7 +35,13 @@ export function usePlants(client: AxiosInstance): Plant[] {
   return plants;
 }
 
-/** "WH 1010 · live" style label for selectors. */
+/**
+ * "WH 1010 · live SAP" / "WH 1030 · demo data" for selectors.
+ *
+ * Demo plants used to render as a bare "WH 1030", indistinguishable from a real
+ * one — which is how a user ends up with a simulator plant as their default and
+ * concludes the whole app is showing fake data.
+ */
 export function plantLabel(p: Plant): string {
-  return `WH ${p.warehouseId}${p.live ? ' · live' : ''}`;
+  return `WH ${p.warehouseId}${p.live ? ' · live SAP' : ' · demo data'}`;
 }

@@ -21,6 +21,7 @@ import { StockoutService } from '../stockout/stockout.service';
 import { EsgService } from '../esg/esg.service';
 import { LiveDataService } from '../live/live-data.service';
 import { LiveWriteService } from '../live/live-write.service';
+import { LandscapeService } from '../live/landscape.service';
 import { hydrateModelOutcomes, isAccountWideLimit, reportModelOutcome } from '../llm/openrouter-provider';
 import { openSecret } from '../common/secret-box';
 import type { UserModelConfig } from '../llm/custom-provider';
@@ -244,6 +245,7 @@ export class ChatService {
     private readonly esg: EsgService,
     private readonly live: LiveDataService,
     private readonly liveWrite: LiveWriteService,
+    private readonly landscape: LandscapeService,
   ) {}
 
   async getUsage(userId: string) {
@@ -336,12 +338,34 @@ export class ChatService {
       [user.id],
     );
     const preferences = prefsRow.rows[0]?.preferences || {};
+    // Which plants exist, and which of them SAP actually answers for. Used both
+    // to recognise a plant in the question and to stop the model quietly
+    // defaulting a live question onto a demo plant.
+    const knownPlants = await this.landscape.plants(user.orgId).catch(() => []);
+    const livePlantIds = knownPlants.filter((p) => p.live).map((p) => String(p.warehouseId));
+    const demoPlantIds = knownPlants.filter((p) => !p.live).map((p) => String(p.warehouseId));
+
+    // A plant id is whatever the landscape says it is. The old `\b10[1-5]0\b`
+    // matched only the simulator's demo range, so real SAP plants (1710, 1110,
+    // AUC1, DE20 …) were never recognised as warehouses at all.
+    const spokenPlants = knownPlants
+      .map((p) => String(p.warehouseId))
+      .filter((id) => new RegExp(`\\b${id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i').test(message));
+
+    const defaultWarehouse = preferences.default_warehouse;
+    const defaultIsDemo = defaultWarehouse ? demoPlantIds.includes(String(defaultWarehouse)) : false;
     const preferenceNote = Object.keys(preferences).length
-      ? ` Known user preferences (apply as defaults unless overridden): ${JSON.stringify(preferences)}.`
+      ? ` Known user preferences (apply ONLY when the user names no warehouse; an explicitly mentioned ` +
+        `warehouse always wins): ${JSON.stringify(preferences)}.` +
+        (defaultIsDemo
+          ? ` WARNING: their default warehouse ${defaultWarehouse} is a demo plant with no live SAP data. ` +
+            `If you answer for it, state plainly that the figures are simulated. Plants with live SAP data: ` +
+            `${livePlantIds.slice(0, 12).join(', ')}.`
+          : '')
       : '';
 
     // Episodic memory (beta): recall recent history for warehouses in play.
-    const mentionedWarehouses = [...new Set([...(message.match(/\b10[1-5]0\b/g) || []), preferences.default_warehouse].filter(Boolean))];
+    const mentionedWarehouses = [...new Set([...spokenPlants, preferences.default_warehouse].filter(Boolean))];
     const orgPrefix = `org:${user.orgId ?? 'default'}:`;
     const episodes = await this.agents.recallEpisodes(mentionedWarehouses.map((w) => `${orgPrefix}wh:${w}`));
     const episodeNote = episodes.length

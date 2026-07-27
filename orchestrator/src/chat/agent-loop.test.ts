@@ -178,6 +178,16 @@ function buildFakes() {
     livePlants: async () => [],
   } as unknown as LiveDataService;
 
+  const landscape = {
+    // Mirrors the real split: 1010 is live SAP, 1030 is a demo plant.
+    plants: async () => [
+      { warehouseId: '1010', live: true },
+      { warehouseId: '1710', live: true },
+      { warehouseId: '1030', live: false },
+    ],
+    warehouseIds: async () => ['1010', '1710', '1030'],
+  };
+
   const liveWrite = {
     canPost: () => false,
     post: async () => null,
@@ -204,6 +214,7 @@ function buildFakes() {
     esg,
     live,
     liveWrite,
+    landscape,
     providerRounds,
     sessionLogs,
     messages,
@@ -238,6 +249,7 @@ describe('agent loop', () => {
       fakes.esg,
       fakes.live,
       fakes.liveWrite,
+      fakes.landscape as never,
     );
 
     const response = await service.chat(user, undefined, 'how much MAT-1 in 1010?');
@@ -277,6 +289,7 @@ describe('agent loop', () => {
       fakes.esg,
       fakes.live,
       fakes.liveWrite,
+      fakes.landscape as never,
     );
 
     await service.chat(user, undefined, 'how much MAT-1 in 1010?');
