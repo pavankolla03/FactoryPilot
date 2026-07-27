@@ -20,7 +20,8 @@
     "verify": "npm run typecheck && npm run test",
     "typecheck": "tsc --noEmit -p orchestrator/tsconfig.json && tsc --noEmit -p frontend/tsconfig.json",
     "lint": "npm run lint --workspaces --if-present",
-    "format": "npm run format --workspaces --if-present"
+    "format": "npm run format --workspaces --if-present",
+    "otto-suite": "node scripts/otto-suite.mjs"
   },
   "devDependencies": {
     "@typescript-eslint/eslint-plugin": "^8.8.0",
