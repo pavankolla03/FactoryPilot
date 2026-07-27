@@ -414,3 +414,8 @@ WHERE NOT EXISTS (SELECT 1 FROM business_objects WHERE object_code = 'SERIAL_NUM
 -- actually flowing rather than inferring it from a chip.
 ALTER TABLE connections ADD COLUMN IF NOT EXISTS last_success_at TIMESTAMP;
 ALTER TABLE connections ADD COLUMN IF NOT EXISTS consecutive_failures INT NOT NULL DEFAULT 0;
+
+-- Phase AT: estimated spend per call. Nullable on purpose — an unpriced model
+-- records NULL rather than 0.00, so "free" and "unknown" stay distinguishable.
+ALTER TABLE token_usage ADD COLUMN IF NOT EXISTS cost_usd NUMERIC(12, 6);
+CREATE INDEX IF NOT EXISTS idx_token_usage_cost ON token_usage (user_id, occurred_at) WHERE cost_usd IS NOT NULL;

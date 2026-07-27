@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { DbService } from '../common/db.service';
 import type { QuotaWindow, UsageSnapshot } from '../common/types';
+import { estimateCostUsd } from '../llm/model-pricing';
 
 @Injectable()
 export class QuotaService {
@@ -12,6 +13,9 @@ export class QuotaService {
       monthly_used: number;
       weekly_used: number;
       daily_used: number;
+      monthly_cost: number;
+      daily_cost: number;
+      unpriced_tokens: number;
       monthly_token_limit: number;
       weekly_token_limit: number | null;
       daily_token_limit: number | null;
@@ -21,6 +25,10 @@ export class QuotaService {
       `SELECT COALESCE(SUM(t.total_tokens) FILTER (WHERE t.occurred_at >= q.period_start), 0)::int AS monthly_used,
               COALESCE(SUM(t.total_tokens) FILTER (WHERE t.occurred_at >= date_trunc('week', NOW())), 0)::int AS weekly_used,
               COALESCE(SUM(t.total_tokens) FILTER (WHERE t.occurred_at >= date_trunc('day', NOW())), 0)::int AS daily_used,
+              COALESCE(SUM(t.cost_usd) FILTER (WHERE t.occurred_at >= q.period_start), 0)::float AS monthly_cost,
+              COALESCE(SUM(t.cost_usd) FILTER (WHERE t.occurred_at >= date_trunc('day', NOW())), 0)::float AS daily_cost,
+              COALESCE(SUM(t.total_tokens) FILTER (
+                WHERE t.occurred_at >= q.period_start AND t.cost_usd IS NULL), 0)::int AS unpriced_tokens,
               q.monthly_token_limit,
               q.weekly_token_limit,
               q.daily_token_limit,
@@ -53,6 +61,15 @@ export class QuotaService {
       periodStart: row?.period_start || new Date().toISOString().slice(0, 10),
       windows,
       overagePolicy: (row?.overage_policy as 'block' | 'warn') || 'block',
+      // Estimated spend (Phase AT). List prices, not billed amounts — the UI
+      // labels it as an estimate, and unpricedTokens says how much of the usage
+      // has no price entry rather than quietly counting it as free.
+      cost: {
+        monthlyUsd: row?.monthly_cost ?? 0,
+        dailyUsd: row?.daily_cost ?? 0,
+        unpricedTokens: row?.unpriced_tokens ?? 0,
+        estimated: true,
+      },
     };
   }
 
@@ -108,10 +125,13 @@ export class QuotaService {
     isEstimated: boolean;
   }) {
     const total = args.promptTokens + args.completionTokens;
+    // Phase AT: price the call now, against the model that actually served it.
+    // Null for unpriced models so "free" and "unknown" stay distinguishable.
+    const costUsd = estimateCostUsd(args.modelUsed, args.promptTokens, args.completionTokens);
     await this.db.query(
-      `INSERT INTO token_usage(user_id, prompt_tokens, completion_tokens, total_tokens, model_used, is_estimated)
-       VALUES($1, $2, $3, $4, $5, $6)`,
-      [args.userId, args.promptTokens, args.completionTokens, total, args.modelUsed, args.isEstimated],
+      `INSERT INTO token_usage(user_id, prompt_tokens, completion_tokens, total_tokens, model_used, is_estimated, cost_usd)
+       VALUES($1, $2, $3, $4, $5, $6, $7)`,
+      [args.userId, args.promptTokens, args.completionTokens, total, args.modelUsed, args.isEstimated, costUsd],
     );
   }
 

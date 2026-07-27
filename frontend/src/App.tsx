@@ -84,7 +84,12 @@ function App() {
   const [workingSince, setWorkingSince] = useState<number | null>(null);
   const chatStartRef = useRef(0);
   const [pendingActions, setPendingActions] = useState<PendingAction[]>([]);
-  const [usage, setUsage] = useState({ used: 0, limit: 50000, periodStart: '' });
+  const [usage, setUsage] = useState<{
+    used: number;
+    limit: number;
+    periodStart: string;
+    cost?: { monthlyUsd: number; dailyUsd: number; unpricedTokens: number; estimated: true };
+  }>({ used: 0, limit: 50000, periodStart: '' });
   const [tab, setTab] = useState<Tab>('chat');
   const [tokenRows, setTokenRows] = useState<any[]>([]);
   const [analytics, setAnalytics] = useState<AnalyticsOverview | null>(null);
@@ -399,7 +404,14 @@ function App() {
 
   async function refreshUsage() {
     const res = await client.get('/api/me/usage');
-    setUsage({ used: res.data.used, limit: res.data.limit, periodStart: res.data.periodStart });
+    // Carry `cost` through — dropping it here left the spend tile reading
+    // "no priced usage yet" while the API was returning real spend.
+    setUsage({
+      used: res.data.used,
+      limit: res.data.limit,
+      periodStart: res.data.periodStart,
+      cost: res.data.cost,
+    });
   }
 
   async function refreshTokenRows() {

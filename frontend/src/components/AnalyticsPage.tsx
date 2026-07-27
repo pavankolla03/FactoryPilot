@@ -12,6 +12,16 @@ import type { SessionLogEntry } from '@manufacturing-agent/shared';
 import { Icon, paths } from './ui';
 import { useI18n } from '../i18n';
 
+/**
+ * Small spend is the norm here (a turn costs fractions of a cent), so rounding
+ * to two decimals would show $0.00 and read as "free".
+ */
+function formatUsd(v: number): string {
+  if (v === 0) return '$0.00';
+  if (v < 0.01) return `$${v.toFixed(4)}`;
+  return `$${v.toFixed(2)}`;
+}
+
 type TokenRow = { user_id: string; email: string; day: string; total_tokens: number };
 
 export type AnalyticsOverview = {
@@ -41,7 +51,12 @@ export function AnalyticsPage({
   isAdmin,
   onExport,
 }: {
-  usage: { used: number; limit: number; periodStart: string };
+  usage: {
+    used: number;
+    limit: number;
+    periodStart: string;
+    cost?: { monthlyUsd: number; dailyUsd: number; unpricedTokens: number; estimated: true };
+  };
   tokenRows: TokenRow[];
   sessionLogs: SessionLogEntry[];
   overview: AnalyticsOverview | null;
@@ -95,7 +110,30 @@ export function AnalyticsPage({
           </div>
         </div>
 
-        <StatTile icon={paths.chat} label={t('usage.requests')} value={stats.requests.toLocaleString()} note="last 500 shown" />
+        {/* Phase AT: token counts stop being meaningful once the models are paid. */}
+        <div className="card p-5">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-semibold uppercase tracking-wider text-fp-ink-3">Estimated spend</span>
+            <Icon path={paths.spark} size={16} strokeWidth={2} />
+          </div>
+          <div className="mt-2 text-[26px] font-semibold tracking-tight text-fp-ink">
+            {usage.cost ? formatUsd(usage.cost.monthlyUsd) : '—'}
+          </div>
+          <div className="mt-1.5 text-xs text-fp-ink-3">
+            {usage.cost ? (
+              <>
+                {formatUsd(usage.cost.dailyUsd)} today · list prices, not billed
+                {usage.cost.unpricedTokens > 0 && (
+                  <div className="mt-0.5 text-fp-warn">
+                    excludes {usage.cost.unpricedTokens.toLocaleString()} tokens from unpriced models
+                  </div>
+                )}
+              </>
+            ) : (
+              'no priced usage yet'
+            )}
+          </div>
+        </div>
         <StatTile
           icon={paths.db}
           label={t('usage.cacheRate')}
