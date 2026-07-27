@@ -360,10 +360,22 @@ function App() {
 
   async function confirmAction(actionId: string) {
     try {
-      await client.post('/api/chat/confirm-action', { actionId });
+      const res = await client.post('/api/chat/confirm-action', { actionId });
+      // This used to always claim the write hit SAP. With no write iFlow
+      // connected it lands in FactoryPilot's ledger only, and saying otherwise
+      // told operators a movement had been posted when SAP knew nothing of it.
+      const postedToSap = Boolean(res.data?.postedToSap);
+      const docs: string[] = res.data?.documentNumbers ?? [];
       setChatTurns((prev) => [
         ...prev,
-        { role: 'assistant', text: 'Done — the operation was executed against SAP.', source: 'live' },
+        {
+          role: 'assistant',
+          text: postedToSap
+            ? `Done — posted to SAP${docs.length ? ` (document ${docs.join(', ')})` : ''}.`
+            : 'Done — recorded in FactoryPilot. **SAP has not been updated**: no write iFlow is connected, ' +
+              'so this movement exists here only. Connect one under Connections → iFlow (write) to post for real.',
+          source: postedToSap ? 'live' : undefined,
+        },
       ]);
     } catch (error) {
       const detail = axios.isAxiosError(error)
@@ -374,6 +386,16 @@ function App() {
     setPendingActions((prev) => prev.filter((a) => a.actionId !== actionId));
     void refreshUsage();
   }
+
+  // Phase AP: whether approvals will actually post to SAP.
+  const [writeTarget, setWriteTarget] = useState<'sap' | 'local' | undefined>(undefined);
+  useEffect(() => {
+    if (!token) return;
+    client
+      .get('/api/ops/landscape/write-target')
+      .then((r) => setWriteTarget(r.data?.target === 'sap' ? 'sap' : 'local'))
+      .catch(() => setWriteTarget(undefined));
+  }, [client, token]);
 
   async function refreshUsage() {
     const res = await client.get('/api/me/usage');
@@ -722,6 +744,7 @@ function App() {
             pendingActions={pendingActions}
             alerts={alerts}
             schedules={schedules}
+            writeTarget={writeTarget}
             onConfirm={(id) => void confirmAction(id)}
             onCancel={(id) => setPendingActions((prev) => prev.filter((x) => x.actionId !== id))}
             onDeleteAlert={(id) => void deleteAlert(id)}

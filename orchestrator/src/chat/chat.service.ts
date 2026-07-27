@@ -872,7 +872,37 @@ export class ChatService {
       await this.agents.onActionExecuted(payload.action.runId, user.displayName, warehouseId, executedQty, steps.length);
     }
 
-    return { success: true, actionId, result: steps.length === 1 ? results[0] : { steps: results } };
+    // Phase AP: never let an approval read as "done in SAP" when no write iFlow
+    // is connected. The target is reported explicitly rather than inferred.
+    const targets = results.map((r) => {
+      const sc = ((r as { structuredContent?: Record<string, unknown> }).structuredContent ?? r) as Record<
+        string,
+        unknown
+      >;
+      return String(sc?.writeTarget ?? 'local');
+    });
+    const postedToSap = targets.length > 0 && targets.every((t) => t === 'sap');
+    const documentNumbers = results
+      .map((r) => {
+        const sc = ((r as { structuredContent?: Record<string, unknown> }).structuredContent ?? r) as Record<
+          string,
+          unknown
+        >;
+        return sc?.documentNumber ? String(sc.documentNumber) : null;
+      })
+      .filter((d): d is string => Boolean(d));
+
+    return {
+      success: true,
+      actionId,
+      postedToSap,
+      writeTarget: postedToSap ? ('sap' as const) : ('local' as const),
+      documentNumbers,
+      writeNote: postedToSap
+        ? `Posted to SAP${documentNumbers.length ? ` — document ${documentNumbers.join(', ')}` : ''}.`
+        : 'Recorded in FactoryPilot only — no write iFlow is connected, so SAP has not been updated.',
+      result: steps.length === 1 ? results[0] : { steps: results },
+    };
   }
 
   /** Live stock for the kanban operations board (scope-checked, cached). */
@@ -1026,12 +1056,22 @@ export class ChatService {
           success: true,
           documentNumber: posted.documentNumber,
           dataSource: posted.dataSource,
+          // Phase AP: where the write actually landed, so no surface has to
+          // infer it from a dataSource string.
+          writeTarget: 'sap' as const,
           ...posted.raw,
         },
       } as unknown as Record<string, unknown>;
     }
 
     const result = await this.mcp.callTool(tool, params);
+    // No write iFlow is registered for this landscape: the movement was recorded
+    // locally and SAP knows nothing about it. Marked here so the approval card,
+    // the chat confirmation and the audit trail all say the same thing.
+    const structured = (result?.structuredContent ?? result) as Record<string, unknown> | undefined;
+    if (structured && typeof structured === 'object') {
+      structured.writeTarget = 'local';
+    }
 
     if (STOCK_MUTATING_TOOLS.has(tool)) {
       if (tool === 'transferStock') {

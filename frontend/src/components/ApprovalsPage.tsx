@@ -21,6 +21,7 @@ export function ApprovalsPage({
   onCancel,
   onDeleteAlert,
   onDeleteSchedule,
+  writeTarget,
 }: {
   pendingActions: PendingAction[];
   alerts: StockAlert[];
@@ -29,6 +30,8 @@ export function ApprovalsPage({
   onCancel: (actionId: string) => void;
   onDeleteAlert: (id: string) => void;
   onDeleteSchedule: (id: string) => void;
+  /** 'local' when no write iFlow is connected, so approvals never reach SAP. */
+  writeTarget?: 'sap' | 'local';
 }) {
   const { t } = useI18n();
 
@@ -41,6 +44,12 @@ export function ApprovalsPage({
             <p className="text-xs text-fp-ink-3">
               Writes proposed by the agent or the operations board — nothing touches SAP until approved here.
             </p>
+            {writeTarget === 'local' && (
+              <p className="mt-1.5 text-xs font-medium text-fp-warn">
+                No write iFlow is connected — approving records the movement in FactoryPilot only, and SAP is
+                not updated. Add one under Connections → iFlow (write) to post for real.
+              </p>
+            )}
           </div>
           {pendingActions.length > 0 && (
             <span className="chip bg-fp-warn-soft text-fp-warn">

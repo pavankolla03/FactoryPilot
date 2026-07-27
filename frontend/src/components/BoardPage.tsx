@@ -37,6 +37,19 @@ export function BoardPage({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [dragged, setDragged] = useState<StockCard | null>(null);
+  // Phase AP: reads come from SAP but writes land in the local ledger unless a
+  // write iFlow exists. The ledger does not know about live SAP positions, so a
+  // drag that looks valid here fails with INSUFFICIENT_STOCK. Rather than invite
+  // a move that cannot succeed, dragging is disabled and the reason is shown.
+  const [writeTarget, setWriteTarget] = useState<'sap' | 'local' | undefined>(undefined);
+  useEffect(() => {
+    client
+      .get('/api/ops/landscape/write-target')
+      .then((r) => setWriteTarget(r.data?.target === 'sap' ? 'sap' : 'local'))
+      .catch(() => setWriteTarget(undefined));
+  }, [client]);
+  const isLive = Boolean(dataSource) && !/simulator/i.test(dataSource);
+  const movesBlocked = isLive && writeTarget === 'local';
   const [dropTarget, setDropTarget] = useState<string | null>(null);
   const [pendingDrop, setPendingDrop] = useState<{ card: StockCard; toLocation: string } | null>(null);
   const [qty, setQty] = useState('');
@@ -180,7 +193,11 @@ export function BoardPage({
                     : '● Live from SAP iFlow'}
             </span>
           )}
-          <span>Drag a card to another location to propose a stock move.</span>
+          <span>
+            {movesBlocked
+              ? 'Moves are disabled: this plant reads from SAP, but no write iFlow is connected, so a move could not be posted back.'
+              : 'Drag a card to another location to propose a stock move.'}
+          </span>
         </div>
       </div>
 
@@ -242,8 +259,8 @@ export function BoardPage({
                 {cards.map((card) => (
                   <div
                     key={`${card.materialId}-${card.location}`}
-                    draggable
-                    onDragStart={() => setDragged(card)}
+                    draggable={!movesBlocked}
+                    onDragStart={() => !movesBlocked && setDragged(card)}
                     onDragEnd={() => {
                       setDragged(null);
                       setDropTarget(null);
