@@ -37,7 +37,8 @@ export type ChatTurnStats = {
 
 export type ChatStatusPayload = {
   conversationId: string;
-  kind: 'thinking' | 'tool_start' | 'tool_end';
+  /** `stream_reset` tells the client to discard the partial reply it has buffered. */
+  kind: 'thinking' | 'tool_start' | 'tool_end' | 'stream_reset';
   round?: number;
 } & Partial<ChatToolEvent>;
 

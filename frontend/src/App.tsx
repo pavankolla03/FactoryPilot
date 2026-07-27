@@ -224,6 +224,11 @@ function App() {
         const next = [...agentStepsRef.current, { ...payload, status: 'running' as const }];
         agentStepsRef.current = next;
         setAgentSteps(next);
+      } else if (payload.kind === 'stream_reset') {
+        // The model died mid-answer; drop the half-written reply so the
+        // fallback that follows reads as a whole message, not a continuation.
+        streamingTextRef.current = '';
+        setStreamingText('');
       } else if (payload.kind === 'tool_end') {
         const existing = agentStepsRef.current.some((s) => s.id === payload.id);
         const next = existing

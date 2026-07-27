@@ -407,6 +407,13 @@ export class ChatService {
         } catch (error) {
           const reason = error instanceof Error ? error.message : 'unknown error';
           this.logger.warn(`LLM provider call failed, using keyword fallback: ${reason}`);
+          // A stream that dies mid-answer has already pushed a partial reply to
+          // the client. Without this the fallback text is appended to it — a
+          // half-written table then swallows the error sentence into a cell.
+          if (streamedChars > 0) {
+            this.realtime.emitChatStatus(user.id, { conversationId: convId, kind: 'stream_reset' });
+            streamedChars = 0;
+          }
           return this.handleFallbackWithoutLlm(user, convId, message, start, invokedTools);
         }
         llmMs += Date.now() - llmStart;
