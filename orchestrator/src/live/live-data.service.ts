@@ -13,6 +13,12 @@ const LIVE_TOOLS = new Set([
   // Phase AN: backed by the material-document and purchase-order iFlows.
   'getRecentMovements',
   'getPurchaseOrders',
+  // Phase AO: derived from the same live payloads rather than the simulator.
+  // No product-master or supplier-master iFlow is connected, so these carry
+  // identifiers and stock facts but not descriptions or supplier names.
+  'searchMaterials',
+  'getMaterialDetails',
+  'getSuppliers',
 ]);
 
 /** Enough rows to aggregate a plant truthfully; the result is then summarized. */
@@ -266,6 +272,10 @@ export class LiveDataService {
 
     if (toolName === 'getRecentMovements') return this.serveMovements(params, orgId);
     if (toolName === 'getPurchaseOrders') return this.servePurchaseOrders(params, orgId);
+    if (toolName === 'getSuppliers') return this.serveSuppliers(orgId);
+    if (toolName === 'searchMaterials' || toolName === 'getMaterialDetails') {
+      return this.serveMaterials(toolName, params, orgId);
+    }
 
     const live = await this.liveStock(orgId);
     if (!live) return null;
@@ -447,6 +457,125 @@ export class LiveDataService {
           ? { truncated: { shown: budgeted.length, total: records.length } }
           : {}),
         records: budgeted,
+      },
+    };
+  }
+
+  /**
+   * Materials, derived from live stock rather than the product master. There is
+   * no API_PRODUCT_SRV iFlow connected, so descriptions and material types are
+   * genuinely unavailable — the payload says so instead of returning invented
+   * text, which is what the simulator would have supplied.
+   */
+  private async serveMaterials(
+    toolName: string,
+    params: Record<string, unknown>,
+    orgId?: string | null,
+  ): Promise<{ structuredContent: Record<string, unknown> } | null> {
+    const live = await this.liveStock(orgId);
+    if (!live) return null;
+
+    const dataSource = live.degraded
+      ? `sap-iflow (last known good · ${this.staleMinutes(live.fetchedAt)}m old · SAP unreachable)`
+      : 'sap-iflow (live)';
+    const noDescriptions =
+      'Material descriptions and material types are not available: no product-master (API_PRODUCT_SRV) ' +
+      'iFlow is connected. Report the material IDs as they are and do not invent names for them.';
+
+    if (toolName === 'getMaterialDetails') {
+      const materialId = String(params.materialId ?? '');
+      const rows = live.rows.filter((r) => r.materialId === materialId);
+      if (!rows.length) return null;
+      const byPlant: Record<string, number> = {};
+      for (const r of rows) byPlant[r.warehouseId] = (byPlant[r.warehouseId] ?? 0) + r.quantity;
+      return {
+        structuredContent: {
+          note: noDescriptions,
+          materialId,
+          productId: materialId,
+          description: null,
+          materialType: null,
+          totalQuantity: rows.reduce((s, r) => s + r.quantity, 0),
+          plants: Object.keys(byPlant).sort(),
+          quantityByPlant: byPlant,
+          storageLocations: [...new Set(rows.map((r) => r.location))].sort(),
+          dataSource,
+        },
+      };
+    }
+
+    // searchMaterials
+    const query = String(params.query ?? params.search ?? '').trim().toLowerCase();
+    const warehouseId = params.warehouseId ? String(params.warehouseId) : undefined;
+    const scoped = warehouseId ? live.rows.filter((r) => r.warehouseId === warehouseId) : live.rows;
+    const seen = new Map<string, { materialId: string; plants: Set<string>; quantity: number }>();
+    for (const r of scoped) {
+      if (query && !r.materialId.toLowerCase().includes(query)) continue;
+      const cur = seen.get(r.materialId);
+      if (cur) {
+        cur.plants.add(r.warehouseId);
+        cur.quantity += r.quantity;
+      } else {
+        seen.set(r.materialId, { materialId: r.materialId, plants: new Set([r.warehouseId]), quantity: r.quantity });
+      }
+    }
+    if (!seen.size) return null;
+    const all = [...seen.values()]
+      .sort((a, b) => b.quantity - a.quantity)
+      .map((m) => ({
+        materialId: m.materialId,
+        productId: m.materialId,
+        description: null,
+        plants: [...m.plants].sort(),
+        totalQuantity: m.quantity,
+      }));
+    const shown = all.length > RESPONSE_ROW_BUDGET ? all.slice(0, RESPONSE_ROW_BUDGET) : all;
+    return {
+      structuredContent: {
+        note: noDescriptions,
+        records: shown,
+        rowCount: all.length,
+        ...(shown.length < all.length ? { truncated: { shown: shown.length, total: all.length } } : {}),
+        dataSource,
+      },
+    };
+  }
+
+  /**
+   * Suppliers, derived from live purchase order headers. Only the SAP supplier
+   * IDs exist — names, lead times and on-time rates need a business-partner
+   * feed, so they are reported as unavailable rather than filled in.
+   */
+  private async serveSuppliers(
+    orgId?: string | null,
+  ): Promise<{ structuredContent: Record<string, unknown> } | null> {
+    const rows = await this.fetchObject('PURCHASING', orgId);
+    if (!rows) return null;
+
+    const counts = new Map<string, number>();
+    for (const r of rows) {
+      const id = String(r.Supplier ?? '').trim();
+      if (id) counts.set(id, (counts.get(id) ?? 0) + 1);
+    }
+    if (!counts.size) return null;
+
+    const records = [...counts.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .map(([supplierId, purchaseOrderCount]) => ({
+        supplierId,
+        name: null,
+        leadTimeDays: null,
+        onTimeRate: null,
+        purchaseOrderCount,
+      }));
+    return {
+      structuredContent: {
+        note:
+          'Supplier IDs come from live SAP purchase order headers. Names, lead times and on-time rates are ' +
+          'NOT available — no business-partner feed is connected. Do not invent supplier names; use the IDs.',
+        records: records.slice(0, RESPONSE_ROW_BUDGET),
+        rowCount: records.length,
+        dataSource: 'sap-iflow (live)',
       },
     };
   }

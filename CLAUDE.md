@@ -53,6 +53,39 @@ UI http://localhost:5173 · API :3000 · iFlow :4000 · login `owner@factorypilo
 | LLM providers + routing/BYOM | `llm/` |
 | Frontend pages/cards | `frontend/src/components/`, wired in `App.tsx` |
 
+## Live SAP vs simulator — read before answering "is X real data?"
+
+Customer tenant: BTP trial `674521f2trial`, four **fixed-endpoint, GET-only**
+iFlows (they ignore OData params; the client parses XML/JSON and filters
+client-side). Credentials are OAuth2, sealed in `connections.secrets_enc`.
+
+| iFlow path | Entity set | Feeds |
+|---|---|---|
+| `/http/materialstockread` | `A_MatlStkInAcctMod` | stock, low stock, summary, materials |
+| `/http/materialdocument` | `A_MaterialDocumentItem` | goods movements |
+| `/http/purchaseorder` | `A_PurchaseOrder` (**header only**) | purchase orders, suppliers |
+| `/http/physicalinventory` | `A_PhysInventoryDocItem` | count documents, variances |
+
+**Live** (`LIVE_TOOLS` in `live/live-data.service.ts`): getStockLevel,
+listWarehouseStock, getLowStock, getWarehouseSummary, getRecentMovements,
+getPurchaseOrders, searchMaterials, getMaterialDetails, getSuppliers.
+
+**Still simulator** — genuinely needs iFlows the customer has not built:
+getDemandTrend (needs posting dates), getProductionOrders, getPurchaseRequisitions,
+and all writes (`live-write.service.ts` posts to an `iflow-write` connection).
+
+**Known data limits — never paper over these:**
+- PO headers have **no plant, material or quantity**. A plant-scoped PO request
+  returns `unavailable` with no `records` array on purpose.
+- `A_MaterialDocumentItem` has **no posting timestamp**, so `sinceHours` is not
+  applied. Never describe movements as "last 24 hours".
+- No product master → material **descriptions are null**; no business-partner
+  feed → supplier **names are null**. Do not invent either.
+
+**The rule that matters:** when the payload cannot support the question, withhold
+the rows — do not annotate them. Prose caveats and boolean flags were both tried
+and the model still fabricated plant scoping; removing `records` is what worked.
+
 ## Phase history
 
 Phases A–R: agentic core → governance → autonomy → multi-tenancy → forecasting →
@@ -62,4 +95,18 @@ registry + contextualization. W: external iFlow connector. X–Z: health score,
 supplier intelligence, slotting. AA–AC: scenario studio, stockout radar, ESG.
 AD: Connection Center. Roadmaps + spec gap analysis in `docs/`.
 
-Branch: `version-3`. Commits: `Phase <X> flagship beta: …`.
+AD: Connection Center. AF–AK: live SAP adapter, landscape service, live writes,
+last-known-good resilience. AM: row budget + payload observability. AN: movements,
+physical inventory, purchase orders live. AO: materials + suppliers off the
+simulator. Roadmaps in `docs/` (`roadmap-phase-an.md` is the most current).
+
+Branch: `version4`. Commits: `Phase <X>: …`.
+
+## Keeping context small
+
+`graphify query` first, always. Beyond that, the two things that actually cost a
+session are re-deriving the live/simulator split (see the table above — keep it
+current) and re-discovering iFlow payload shapes. For the latter use
+`POST /api/admin/business-objects/:id/preview`, which returns real rows plus the
+field names SAP actually returned — a fixed endpoint often serves a different
+entity set than the registry claims, and this is how two such mismatches were caught.
