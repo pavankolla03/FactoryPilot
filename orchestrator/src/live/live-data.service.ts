@@ -618,6 +618,44 @@ export class LiveDataService {
     };
   }
 
+
+  /**
+   * Tool descriptions written for the simulator mislead the model once SAP is
+   * connected. getPurchaseOrders is the worst case: warehouseId is REQUIRED and
+   * status is an enum of open|in_transit|delivered, none of which exist in the
+   * customer's purchase order HEADER feed. Asked for "POs in warehouse 1030"
+   * the model called no tool at all and asked the user to pick a status that
+   * cannot be answered.
+   *
+   * Returns a replacement description for a tool when live data serves it.
+   */
+  toolOverride(toolName: string): { description: string; inputSchema?: Record<string, unknown> } | null {
+    if (toolName === 'getPurchaseOrders') {
+      // Description only — deliberately NOT the input schema. Dropping
+      // warehouseId from the schema stopped the model passing it, which in turn
+      // stopped servePurchaseOrders returning its `unavailable` guard, and the
+      // model went straight back to "50 open purchase orders in warehouse 1030".
+      // The structural guard depends on receiving the plant, so keep the param.
+      return {
+        description:
+          'Purchase orders from SAP. About purchase orders ONLY; it implies nothing about other data. ' +
+          'This landscape serves PO header records — supplier and dates, but no plant, material or quantity. ' +
+          'Pass warehouseId when the user names a plant: the tool will tell you plant scoping is impossible ' +
+          'here, and you must relay that rather than attributing the orders to that plant.',
+      };
+    }
+
+    if (toolName === 'getRecentMovements') {
+      return {
+        description:
+          'Goods movements from SAP material documents for a plant. The SAP entity carries no posting ' +
+          'timestamp, so any time window (sinceHours) is IGNORED — never describe the result as recent or ' +
+          'as "the last 24 hours".',
+      };
+    }
+    return null;
+  }
+
   /** Plants that actually have live stock — used to show what is connected. */
   async livePlants(orgId?: string | null): Promise<string[]> {
     const live = await this.liveStock(orgId);

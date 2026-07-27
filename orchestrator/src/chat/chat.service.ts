@@ -332,7 +332,16 @@ export class ChatService {
       return this.emitFallbackText(user, convId, message, start, capability, []);
     }
 
-    const tools = [...this.mcp.listTools(), ...LOCAL_TOOLS];
+    let tools = [...this.mcp.listTools(), ...LOCAL_TOOLS];
+    // Tool descriptions ship with the simulator's semantics. Once SAP answers a
+    // tool, describe what SAP actually supports — otherwise the model asks for
+    // parameters the live feed has no concept of.
+    tools = tools.map((t) => {
+      const override = this.live.canServe(t.name) ? this.live.toolOverride(t.name) : null;
+      // LOCAL_TOOLS' schemas are literal-inferred; the override is a plain
+      // object, so widen here rather than loosening the shared tool type.
+      return (override ? { ...t, ...override } : t) as (typeof tools)[number];
+    });
     const prefsRow = await this.db.query<{ preferences: Record<string, string> }>(
       'SELECT preferences FROM users WHERE id = $1',
       [user.id],
@@ -380,6 +389,18 @@ export class ChatService {
           .map((b) => `${b.code} — ${b.name} — ${b.keywords}`)
           .join('; ')}. Route order/delivery/shipping/goods-movement/purchasing questions to queryBusinessObject with the matching objectCode.`
       : '';
+    // SAP calls it a plant, the tools call it warehouseId. The prompt tells the
+    // model to ask when warehouseId is "unknown", and it read "plant 1010" as
+    // unknown — bouncing the question back on 4 of 4 runs. The plant is resolved
+    // here from the landscape, so state the parameter value outright.
+    const resolvedPlantNote =
+      spokenPlants.length === 1
+        ? ` The user's question refers to plant ${spokenPlants[0]}. In SAP a "plant" IS the warehouse, so ` +
+          `pass warehouseId="${spokenPlants[0]}" to any tool that takes it. Do NOT ask them to confirm it.`
+        : spokenPlants.length > 1
+          ? ` The question mentions plants ${spokenPlants.join(', ')}; use those as warehouseId values.`
+          : '';
+
     const systemPrompt =
       "You are Otto, FactoryPilot's warehouse copilot for SAP manufacturing. " +
       'Style: open with a one-sentence direct answer, then add structure only when it helps — markdown tables for records, ' +
@@ -390,6 +411,7 @@ export class ChatService {
       'Invoke tools ONLY through the function-calling mechanism; never print a JSON tool call as text. ' +
       'Copy parameter values exactly as the user stated them (e.g. location names like "packing" or "shipping"). ' +
       'You can create stock alerts (createStockAlert) when the user asks to be notified about stock levels.' +
+      resolvedPlantNote +
       preferenceNote +
       episodeNote +
       businessObjectNote;
@@ -501,6 +523,21 @@ export class ChatService {
             invokedTools.push(call.name);
 
             const toolDesc = this.getToolDescriptor(call.name);
+
+            // SAP says "plant", the tools say "warehouseId", and the model does
+            // not reliably equate them — asked for "stock in plant 1010" it
+            // answered "please provide the warehouseId for plant 1010" on 4 of 4
+            // runs. When the question names exactly one known plant and the
+            // model left warehouseId out, fill it in rather than bouncing the
+            // question back. Deterministic, so it does not depend on wording.
+            if (
+              !call.arguments.warehouseId &&
+              spokenPlants.length === 1 &&
+              this.requiresWarehouseScope(toolDesc?.inputSchema)
+            ) {
+              call.arguments = { ...call.arguments, warehouseId: spokenPlants[0] };
+            }
+
             const warehouseId = (call.arguments.warehouseId as string | undefined) || undefined;
             if (call.name === 'transferStock') {
               // Inter-warehouse transfer touches two warehouses — write scope on both.
@@ -2180,6 +2217,30 @@ export class ChatService {
     return value;
   }
 
+  /**
+   * When SAP is connected but this particular plant/tool is still served by the
+   * simulator, say so inside the payload. The provenance chip in the UI already
+   * showed it, but the answer text did not — asked about demo plant 1030, the
+   * model tabulated MAT-10023464 as though it were real SAP stock.
+   *
+   * Same rule as the purchase-order fix: put the caveat where the model reads,
+   * not only where a human might notice it.
+   */
+  private markSimulated(data: unknown, hasLiveLandscape: boolean): unknown {
+    if (!hasLiveLandscape) return data;
+    const sc = (data as { structuredContent?: Record<string, unknown> })?.structuredContent;
+    if (!sc || typeof sc !== 'object') return data;
+    const source = String(sc.dataSource ?? '');
+    if (!source || !/sim/i.test(source)) return data;
+
+    sc.simulated = true;
+    sc.note =
+      'THESE FIGURES ARE SIMULATED, not from SAP. This plant is a built-in demo plant with no live SAP ' +
+      'data, while other plants in this landscape are live. State clearly in your answer that these numbers ' +
+      'are demo data, not real stock.' + (sc.note ? ` ${String(sc.note)}` : '');
+    return data;
+  }
+
   private async readToolWithCache(
     toolName: string,
     params: Record<string, unknown>,
@@ -2201,10 +2262,17 @@ export class ChatService {
       }
     }
 
+    // Whether anything in this landscape is live, so a simulator answer can be
+    // flagged as the exception rather than silently mixed in.
+    const hasLive = await this.live
+      .livePlants(orgId)
+      .then((p) => p.length > 0)
+      .catch(() => false);
+
     const policy = await this.getCachePolicy(toolName);
     if (policy && !policy.enabled) {
       const live = await this.mcp.callTool(toolName, params);
-      return { data: live, cacheHit: false };
+      return { data: this.markSimulated(live, hasLive), cacheHit: false };
     }
 
     const warehouseKey = (params.warehouseId as string | undefined) || 'global';
@@ -2216,10 +2284,13 @@ export class ChatService {
 
     const hit = await this.redis.raw.get(cacheKey);
     if (hit) {
-      return { data: JSON.parse(hit), cacheHit: true };
+      // Mark on read as well as on write: entries cached before a landscape
+      // changed (or before this marking existed) would otherwise replay a
+      // simulated payload with no indication that it is not SAP.
+      return { data: this.markSimulated(JSON.parse(hit), hasLive), cacheHit: true };
     }
 
-    const live = await this.mcp.callTool(toolName, params);
+    const live = this.markSimulated(await this.mcp.callTool(toolName, params), hasLive);
     await this.redis.raw.setEx(cacheKey, policy?.ttl_seconds || this.cacheTtlSeconds, JSON.stringify(live));
     return { data: live, cacheHit: false };
   }
