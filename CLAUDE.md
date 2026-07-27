@@ -98,7 +98,13 @@ AD: Connection Center. Roadmaps + spec gap analysis in `docs/`.
 AD: Connection Center. AF–AK: live SAP adapter, landscape service, live writes,
 last-known-good resilience. AM: row budget + payload observability. AN: movements,
 physical inventory, purchase orders live. AO: materials + suppliers off the
-simulator. Roadmaps in `docs/` (`roadmap-phase-an.md` is the most current).
+simulator. AP: write provenance. AQ: LLM-failure honesty + expandable SAP
+evidence trail per tool step. AS: evals that assert refusal, not just retrieval.
+AT: real cost accounting (`llm/model-pricing.ts`, `token_usage.cost_usd`).
+AU: registry validation — `POST /api/admin/business-objects/validate-all` checks
+every configured field against a live preview. Run it after any registry or
+iFlow change; it has caught three silent misconfigurations so far.
+Roadmaps in `docs/`.
 
 Branch: `version4`. Commits: `Phase <X>: …`.
 
