@@ -27,6 +27,34 @@ async function loadPromotedCases(base, token) {
   }
 }
 
+// Honesty cases: assert what the agent must NOT claim when the connected SAP
+// data cannot support it. Retrieval-only checks passed while the agent was
+// inventing plant scoping and supplier names, so these assert refusal instead.
+const HONESTY_CASES = [
+  {
+    q: 'list the open purchase orders for warehouse 1030 and their suppliers',
+    tools: [],
+    // Live PO headers carry no plant, so any count of POs "for warehouse 1030"
+    // is fabricated. The answer must own the limitation instead.
+    mustNotMatch: ['\\d+\\s+open purchase orders', 'warehouse 1030 has'],
+    mustMatch: ["cannot|can't|unable|not available|header"],
+  },
+  {
+    q: 'which suppliers do we buy from?',
+    tools: [],
+    // Names the simulator used to supply. Live SAP has IDs only; if one of these
+    // appears, master data is being invented.
+    mustNotMatch: ['Rheinwerk|Nordbolt|Adriatic|Precision Jig'],
+  },
+  {
+    q: 'what moved in plant 1710 in the last 24 hours?',
+    tools: [],
+    // A_MaterialDocumentItem exposes no posting timestamp, so no time window
+    // was applied and the agent must not present the rows as last-24h activity.
+    mustNotMatch: ['in the last 24 hours,? (there were|we had|\\d+)'],
+  },
+];
+
 const CASES = [
   { q: 'show stock for material MAT-10023456 in warehouse 1010', tools: ['getStockLevel'] },
   { q: 'what stock does warehouse 1020 hold?', tools: ['listWarehouseStock'] },
@@ -101,7 +129,7 @@ async function main() {
   if (promoted.length > 0) {
     console.log(`+ ${promoted.length} promoted case(s) from feedback flywheel`);
   }
-  const ALL_CASES = [...CASES, ...promoted];
+  const ALL_CASES = [...CASES, ...HONESTY_CASES, ...promoted];
 
   for (const [i, testCase] of ALL_CASES.entries()) {
     const label = `${String(i + 1).padStart(2, '0')} ${testCase.q.slice(0, 60)}`;
@@ -123,6 +151,18 @@ async function main() {
       }
       if (testCase.expectPending && !res.body.pendingAction) {
         throw new Error('expected a pending approval but none was returned');
+      }
+      const answer = String(res.body.text || '');
+      for (const pattern of testCase.mustNotMatch || []) {
+        const hit = new RegExp(pattern, 'i').exec(answer);
+        if (hit) {
+          throw new Error(`answer claimed something the data cannot support: "${hit[0]}" (/${pattern}/)`);
+        }
+      }
+      for (const pattern of testCase.mustMatch || []) {
+        if (!new RegExp(pattern, 'i').test(answer)) {
+          throw new Error(`answer never acknowledged the limitation (/${pattern}/)`);
+        }
       }
       if (testCase.expectSubstring && !String(res.body.text || '').toLowerCase().includes(testCase.expectSubstring.toLowerCase())) {
         throw new Error(`answer missing expected substring "${testCase.expectSubstring}"`);
