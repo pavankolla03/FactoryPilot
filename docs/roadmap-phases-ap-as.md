@@ -56,6 +56,22 @@ scale as objects are added.
   reference a field absent from a live `preview` — exactly the
   `PURCHASING`/`Plant` mismatch, caught automatically.
 
+## AT — the free model is the remaining latency, not the code
+
+With greetings short-circuited, what is left is genuinely model-bound: a live
+stock question took ~130s end to end, of which the SAP fetch is ~2s. Options, in
+order of effort:
+
+- Stream the first tool result into the answer so the user sees data at ~3s
+  rather than waiting for the whole completion.
+- Route simple single-tool questions ("stock in 1710") to a table renderer with
+  no second LLM round — the data is already structured; the model is only
+  formatting it.
+- Make the model configurable per question class (BYOM already exists): a fast
+  small model for retrieval-shaped questions, the larger one for analysis.
+
+The second is the biggest win and needs no new infrastructure.
+
 ## Order
 
 **AP then AS** — both are unblocked and both close honesty gaps that currently
