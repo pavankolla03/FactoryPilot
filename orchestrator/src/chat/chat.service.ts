@@ -34,6 +34,15 @@ const STOCK_MUTATING_TOOLS = new Set(['moveStock', 'receivePurchaseOrder', 'adju
 // Tools served by the orchestrator itself (user-scoped state), not by an MCP server.
 const LOCAL_TOOLS = [
   {
+    name: 'listConnections',
+    description:
+      'List the SAP connections registered in FactoryPilot — the iFlows, S/4HANA and BTP endpoints this ' +
+      'assistant reads from, including which OData entity set each one serves and whether it is currently ' +
+      'reachable. Use whenever the user asks what iFlows, connections, endpoints or source systems exist, ' +
+      'or which systems the data comes from. This is FactoryPilot configuration, not SAP business data.',
+    inputSchema: { type: 'object', properties: {}, required: [] },
+  },
+  {
     name: 'createStockAlert',
     description:
       'Create a stock alert for the current user. They will be notified when the total stock of a material in a warehouse drops below the threshold. Use when the user asks to be alerted, notified, or watched about stock levels.',
@@ -1115,6 +1124,41 @@ export class ChatService {
   }
 
   private async executeLocalTool(user: AuthUser, name: string, args: Record<string, unknown>) {
+    if (name === 'listConnections') {
+      // Asked "which iFlows are you connected to?", the model used to answer
+      // "I don't have access to that" — it had the data, just no way to reach it.
+      const rows = await this.db.query<{
+        name: string;
+        kind: string;
+        active: boolean;
+        status: string;
+        entity_set: string | null;
+        url: string | null;
+      }>(
+        `SELECT name, kind, active, status,
+                config->>'probeEntitySet' AS entity_set,
+                COALESCE(config->>'url', config->>'baseUrl') AS url
+         FROM connections
+         WHERE org_id IS NULL OR org_id = $1
+         ORDER BY kind, name`,
+        [user.orgId ?? null],
+      );
+      return {
+        structuredContent: {
+          connections: rows.rows.map((r) => ({
+            name: r.name,
+            kind: r.kind,
+            state: !r.active ? 'inactive' : r.status === 'ok' ? 'connected' : r.status,
+            servesEntitySet: r.entity_set,
+            // Path only: the host carries the customer's tenant id.
+            path: r.url ? r.url.replace(/^https?:\/\/[^/]+/, '') : null,
+          })),
+          count: rows.rows.length,
+          note: 'These are FactoryPilot connection settings, not SAP business data.',
+        },
+      };
+    }
+
     if (name === 'createStockAlert') {
       const alert = await this.alerts.createAlert(
         user,
@@ -1529,7 +1573,13 @@ export class ChatService {
 
     let plants: string[] = [];
     try {
-      plants = await this.live.livePlants(orgId);
+      // Naming the connected plants is a nice touch, not worth a cold SAP round
+      // trip — that turned an instant answer into a 3.7s one. Take it if the
+      // snapshot is warm, otherwise answer without it.
+      plants = await Promise.race([
+        this.live.livePlants(orgId),
+        new Promise<string[]>((resolve) => setTimeout(() => resolve([]), 400)),
+      ]);
     } catch {
       /* capability text is still useful without it */
     }
