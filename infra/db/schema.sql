@@ -306,11 +306,11 @@ SELECT * FROM (VALUES
   ('GOODS_MOVEMENT', 'Goods Movements',
    'goods movement, movement, material document, posting, 101, 601, receipt, issue',
    '/sap/opu/odata/sap/API_MATERIAL_DOCUMENT_SRV', 'A_MaterialDocumentItem',
-   'Plant eq ''{warehouseId}''', 'MaterialDocument,GoodsMovementType,Material,Plant,QuantityInEntryUnit,PostingDate', 'PostingDate', 'v2', 100),
+   'Plant eq ''{warehouseId}''', 'MaterialDocument,MaterialDocumentItem,GoodsMovementType,Material,Plant,StorageLocation,QuantityInBaseUnit,MaterialBaseUnit,DebitCreditCode,FiscalYearPeriod', 'PostingDate', 'v2', 100),
   ('PURCHASING', 'Purchase Orders',
    'purchasing, purchase order, PO, procurement, buy, supplier order',
    '/sap/opu/odata/sap/API_PURCHASEORDER_PROCESS_SRV', 'A_PurchaseOrderItem',
-   'Plant eq ''{warehouseId}''', 'PurchaseOrder,Material,Plant,OrderQuantity,DeliveryStatus,Supplier,DeliveryDate', 'DeliveryDate', 'v2', 50)
+   'Plant eq ''{warehouseId}''', 'PurchaseOrder,PurchaseOrderType,Supplier,PurchasingGroup,PurchasingOrganization,CompanyCode,DocumentCurrency,PurchaseOrderDate,CreationDate,PurchasingProcessingStatus', 'DeliveryDate', 'v2', 50)
 ) AS seed(object_code, object_name, keywords, odata_service_path, entity_set, default_filters, select_fields, date_field, api_version, top_limit)
 WHERE NOT EXISTS (SELECT 1 FROM business_objects b WHERE b.object_code = seed.object_code AND b.org_id IS NULL);
 

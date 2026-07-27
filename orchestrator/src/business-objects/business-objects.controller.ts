@@ -63,4 +63,16 @@ export class BusinessObjectsController {
   preview(@CurrentUser() user: AuthUser, @Param('id') id: string) {
     return this.service.preview(user, id);
   }
+
+  /** Check one object's config against the fields SAP really returns. */
+  @Post('/:id/validate')
+  validate(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.service.validate(user, id);
+  }
+
+  /** Same check across every active object — the registry health sweep. */
+  @Post('/validate-all')
+  validateAll(@CurrentUser() user: AuthUser) {
+    return this.service.validateAll(user);
+  }
 }

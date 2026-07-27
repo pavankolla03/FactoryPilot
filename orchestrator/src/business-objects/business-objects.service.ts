@@ -249,6 +249,107 @@ export class BusinessObjectsService {
     };
   }
 
+  /** Field names referenced by an object's configuration. */
+  private configuredFields(cfg: BusinessObjectRow): Array<{ field: string; setting: string }> {
+    const out: Array<{ field: string; setting: string }> = [];
+    // "Plant eq '{warehouseId}'" → Plant. Only the left-hand side of a clause.
+    for (const m of (cfg.default_filters || '').matchAll(/([A-Za-z_][A-Za-z0-9_]*)\s+(?:eq|ne|gt|ge|lt|le)\s/g)) {
+      out.push({ field: m[1], setting: 'default_filters' });
+    }
+    if (cfg.date_field) out.push({ field: cfg.date_field, setting: 'date_field' });
+    if (cfg.status_field) out.push({ field: cfg.status_field, setting: 'status_field' });
+    for (const g of (cfg.group_by || '').split(',').map((x) => x.trim()).filter(Boolean)) {
+      out.push({ field: g, setting: 'group_by' });
+    }
+    for (const f of (cfg.select_fields || '').split(',').map((x) => x.trim()).filter(Boolean)) {
+      out.push({ field: f, setting: 'select_fields' });
+    }
+    return out;
+  }
+
+  /**
+   * Check an object's configuration against the fields SAP actually returns.
+   *
+   * PURCHASING was configured with `Plant eq '{warehouseId}'` while its endpoint
+   * serves the purchase order HEADER entity, which has no Plant — so the filter
+   * silently matched nothing and read as "this plant has no purchase orders".
+   * Nothing in the app noticed. This is that check, run on demand.
+   */
+  async validate(
+    user: AuthUser,
+    id: string,
+  ): Promise<{
+    objectCode: string;
+    entitySet: string;
+    ok: boolean;
+    fieldsReturned: number;
+    issues: Array<{ field: string; setting: string; message: string }>;
+    error?: string;
+  }> {
+    const row = await this.byId(user, id);
+    if (!row) {
+      validationError('business object not found');
+    }
+    const cfg = row!;
+    let fields: string[] = [];
+    try {
+      const preview = await this.preview(user, id);
+      fields = preview.fields;
+    } catch (error) {
+      return {
+        objectCode: cfg.object_code,
+        entitySet: cfg.entity_set,
+        ok: false,
+        fieldsReturned: 0,
+        issues: [],
+        error: error instanceof Error ? error.message : 'preview failed',
+      };
+    }
+
+    // An endpoint that returned nothing tells us nothing — do not report every
+    // configured field as missing on the strength of an empty response.
+    if (!fields.length) {
+      return {
+        objectCode: cfg.object_code,
+        entitySet: cfg.entity_set,
+        ok: false,
+        fieldsReturned: 0,
+        issues: [],
+        error: 'the endpoint returned no rows, so its fields could not be checked',
+      };
+    }
+
+    const known = new Set(fields);
+    const issues = this.configuredFields(cfg)
+      .filter((c) => !known.has(c.field))
+      .map((c) => ({
+        field: c.field,
+        setting: c.setting,
+        message:
+          c.setting === 'default_filters'
+            ? `filters on '${c.field}', which this endpoint does not return — the filter will match nothing`
+            : `'${c.field}' is not returned by this endpoint`,
+      }));
+
+    return {
+      objectCode: cfg.object_code,
+      entitySet: cfg.entity_set,
+      ok: issues.length === 0,
+      fieldsReturned: fields.length,
+      issues,
+    };
+  }
+
+  /** Validate every active object the user can see. */
+  async validateAll(user: AuthUser) {
+    const rows = (await this.list(user)).filter((r) => r.is_active);
+    const results = [];
+    for (const row of rows) {
+      results.push(await this.validate(user, row.id));
+    }
+    return { checked: results.length, results };
+  }
+
   /** Format a date-equality clause per OData version (v2 needs a datetime literal). */
   private dateEq(field: string, isoDate: string, apiVersion: string): string {
     return apiVersion === 'v4' ? `${field} eq ${isoDate}` : `${field} eq datetime'${isoDate}T00:00:00'`;
