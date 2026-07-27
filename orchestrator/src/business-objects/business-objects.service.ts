@@ -48,6 +48,9 @@ export interface BusinessObjectInput {
  * consultants add SAP OData objects with no code change. The generic query path
  * resolves config here, builds the OData request, and calls the iFlow passthrough.
  */
+/** Rows returned to the model per business-object answer (see LiveDataService). */
+const ROW_BUDGET = Number(process.env.LIVE_ROW_BUDGET || 30);
+
 @Injectable()
 export class BusinessObjectsService {
   private readonly logger = new Logger(BusinessObjectsService.name);
@@ -209,6 +212,43 @@ export class BusinessObjectsService {
     return this.iflow.testConnection(row!.odata_service_path, row!.entity_set, landscape);
   }
 
+  /**
+   * Sample real rows for an object and report the fields SAP actually returned.
+   * A fixed-endpoint iFlow often serves a different entity set than configured,
+   * so this shows the truth rather than what the registry claims.
+   */
+  async preview(
+    user: AuthUser,
+    id: string,
+  ): Promise<{
+    objectCode: string;
+    entitySet: string;
+    dataSource: string;
+    rowCount: number;
+    fields: string[];
+    sample: Array<Record<string, unknown>>;
+  }> {
+    const row = await this.byId(user, id);
+    if (!row) {
+      validationError('business object not found');
+    }
+    const cfg = row!;
+    const landscape = await this.resolveLandscape(user.orgId, cfg.entity_set);
+    const result = await this.iflow.query(
+      { service: cfg.odata_service_path, entitySet: cfg.entity_set, top: 5, objectCode: cfg.object_code },
+      landscape,
+    );
+    const fields = [...new Set(result.records.flatMap((r) => Object.keys(r)))].sort();
+    return {
+      objectCode: cfg.object_code,
+      entitySet: cfg.entity_set,
+      dataSource: result.dataSource,
+      rowCount: result.records.length,
+      fields,
+      sample: result.records.slice(0, 3),
+    };
+  }
+
   /** Format a date-equality clause per OData version (v2 needs a datetime literal). */
   private dateEq(field: string, isoDate: string, apiVersion: string): string {
     return apiVersion === 'v4' ? `${field} eq ${isoDate}` : `${field} eq datetime'${isoDate}T00:00:00'`;
@@ -224,6 +264,9 @@ export class BusinessObjectsService {
     dataSource: string;
     summary: BusinessObjectSummary;
     records: Array<Record<string, unknown>>;
+    rowCount?: number;
+    truncated?: { shown: number; total: number };
+    note?: string;
   }> {
     const row = await this.resolve(user, args.objectCode);
     if (!row) {
@@ -276,12 +319,22 @@ export class BusinessObjectsService {
       groupBy: (cfg.group_by || '').split(',').map((s) => s.trim()).filter(Boolean),
       dateField: cfg.date_field,
     });
+    // Cap what the model reads, but say so — the summary above still describes
+    // every row, so counts and breakdowns remain correct.
+    const shown = records.length > ROW_BUDGET ? records.slice(0, ROW_BUDGET) : records;
     return {
       objectCode: cfg.object_code,
       objectName: cfg.object_name,
       dataSource: result!.dataSource,
       summary,
-      records,
+      rowCount: records.length,
+      ...(shown.length < records.length
+        ? {
+            truncated: { shown: shown.length, total: records.length },
+            note: `Showing ${shown.length} of ${records.length} rows; the summary covers all of them.`,
+          }
+        : {}),
+      records: shown,
     };
   }
 }

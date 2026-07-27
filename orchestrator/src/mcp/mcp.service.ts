@@ -51,12 +51,12 @@ export class McpService implements OnModuleInit {
     return this.tools.get(name);
   }
 
-  async callTool(name: string, args: Record<string, unknown>, orgId?: string | null) {
+  async callTool(name: string, args: Record<string, unknown>, orgId?: string | null, full = false) {
     // Live SAP wins over the simulator (Phase AF). Intercepting here means every
     // consumer — chat, board, Insights cards and the agents — reads real data
     // wherever a connected source can answer, with no per-service wiring.
     if (this.live.canServe(name)) {
-      const served = await this.live.serve(name, args, orgId).catch((error) => {
+      const served = await this.live.serve(name, args, orgId, full).catch((error) => {
         this.logger.warn(`live serve(${name}) failed: ${error instanceof Error ? error.message : 'unknown'}`);
         return null;
       });

@@ -381,8 +381,24 @@ SELECT NULL, 'MATERIAL_STOCK', 'Material Stock',
   'InventoryStockType', 'Plant,StorageLocation', 'v2', 50, true, 'seed'
 WHERE NOT EXISTS (SELECT 1 FROM business_objects WHERE object_code = 'MATERIAL_STOCK' AND org_id IS NULL);
 
--- Serial numbers: served by the customer's /http/materialdocument iFlow, which
--- returns A_SerialNumberMaterialDocument (traceability), not movement lines.
+-- Phase AN: physical inventory counts, served by the customer's
+-- /http/physicalinventory iFlow. A_PhysInventoryDocItem carries Plant, so counts
+-- and variances can be scoped to a warehouse.
+INSERT INTO business_objects
+  (org_id, object_code, object_name, keywords, odata_service_path, entity_set,
+   default_filters, select_fields, date_field, group_by, api_version, top_limit, is_active, created_by)
+SELECT NULL, 'PHYSICAL_INVENTORY', 'Physical Inventory Documents',
+  'physical inventory, stock count, cycle count, inventory count, count document, variance, counting difference',
+  '/sap/opu/odata/sap/API_PHYSICAL_INVENTORY_DOC_SRV', 'A_PhysInventoryDocItem',
+  'Plant eq ''{warehouseId}''',
+  NULL, 'PhysicalInventoryLastCountDate', 'Plant', 'v2', 50, true, 'seed'
+WHERE NOT EXISTS (SELECT 1 FROM business_objects WHERE object_code = 'PHYSICAL_INVENTORY' AND org_id IS NULL);
+
+-- Serial numbers: the /http/materialdocument iFlow originally returned
+-- A_SerialNumberMaterialDocument. The customer has since repointed it at
+-- A_MaterialDocumentItem (movements), so this is seeded inactive.
+-- NOTE (Phase AN): A_PurchaseOrder is the HEADER entity — it has no Plant,
+-- Material or quantity, so PURCHASING carries no plant filter on purpose.
 INSERT INTO business_objects
   (org_id, object_code, object_name, keywords, odata_service_path, entity_set,
    default_filters, select_fields, group_by, api_version, top_limit, is_active, created_by)
@@ -391,7 +407,7 @@ SELECT NULL, 'SERIAL_NUMBERS', 'Serial Numbers',
   '/sap/opu/odata/sap/API_MATERIAL_DOCUMENT_SRV', 'A_SerialNumberMaterialDocument',
   NULL,
   'MaterialDocument,MaterialDocumentYear,MaterialDocumentItem,Material,SerialNumber',
-  'Material', 'v2', 30, true, 'seed'
+  'Material', 'v2', 30, false, 'seed'
 WHERE NOT EXISTS (SELECT 1 FROM business_objects WHERE object_code = 'SERIAL_NUMBERS' AND org_id IS NULL);
 
 -- Phase AK: connection health, so an operator can see whether live data is

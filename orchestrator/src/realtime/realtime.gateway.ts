@@ -20,6 +20,8 @@ export type ChatToolEvent = {
   dataSource?: string;
   /** True when the record came from the customer's connected SAP landscape. */
   live?: boolean;
+  /** Serialized payload size handed to the model, in bytes. */
+  bytes?: number;
   status: 'ok' | 'error' | 'pending';
 };
 

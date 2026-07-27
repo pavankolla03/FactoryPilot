@@ -102,6 +102,10 @@ services:
     ports:
       - "3000:3000"
     environment:
+      # Docker's NAT64 hands out unreachable 64:ff9b:: addresses for the SAP BTP
+      # hosts; Happy Eyeballs then stalls the TLS handshake until it times out.
+      # Pinning to IPv4 keeps the iFlow calls working inside the container.
+      NODE_OPTIONS: --no-network-family-autoselection
       PORT: 3000
       AUTH_MODE: ${AUTH_MODE:-local}
       AUTH_JWT_SECRET: ${AUTH_JWT_SECRET:-change-me-in-prod}

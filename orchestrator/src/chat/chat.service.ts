@@ -274,7 +274,12 @@ export class ChatService {
 
     // Query dedupe: identical (normalized) read questions from the same user
     // within the TTL replay the cached answer without spending tokens.
-    const dedupeKey = `answer:${user.id}:${this.sortedHash({ q: this.normalizeQuery(message) })}`;
+    // The landscape fingerprint is part of the key: connecting an iFlow or
+    // editing a business object changes what a question can truthfully be
+    // answered with, so cached answers from before the change must not replay.
+    const dedupeKey = `answer:${user.id}:${await this.landscapeFingerprint()}:${this.sortedHash({
+      q: this.normalizeQuery(message),
+    })}`;
     const cachedAnswer = await this.redis.raw.get(dedupeKey);
     if (cachedAnswer) {
       const cached = JSON.parse(cachedAnswer) as { text: string; grounded: boolean };
@@ -500,6 +505,8 @@ export class ChatService {
               else if (isLive) liveHits += 1;
               else simHits += 1;
             }
+            const toolContent = JSON.stringify(data);
+            payloadBytes += toolContent.length;
             const event: ChatToolEvent = {
               id: stepId,
               tool: call.name,
@@ -509,13 +516,13 @@ export class ChatService {
               cacheHit,
               dataSource: ds || undefined,
               live: ds ? isLive : undefined,
+              // What this tool actually cost the model to read (Phase AM).
+              bytes: toolContent.length,
               status: 'ok',
             };
             toolEvents.push(event);
             this.realtime.emitChatStatus(user.id, { conversationId: convId, kind: 'tool_end', ...event });
             source = cacheHit ? 'cache' : source;
-            const toolContent = JSON.stringify(data);
-            payloadBytes += toolContent.length;
             llmMessages.push({
               role: 'tool',
               name: call.name,
@@ -856,7 +863,14 @@ export class ChatService {
     }
     this.assertScope(user, warehouseId, 'read');
 
-    const { data, cacheHit } = await this.readToolWithCache('listWarehouseStock', { warehouseId }, user.id, user.orgId);
+    // The board renders every position, so it opts out of the model row budget.
+    const { data, cacheHit } = await this.readToolWithCache(
+      'listWarehouseStock',
+      { warehouseId },
+      user.id,
+      user.orgId,
+      true,
+    );
     const structured = (data as { structuredContent?: { records?: unknown[]; dataSource?: string } })
       .structuredContent;
     return {
@@ -1781,21 +1795,46 @@ export class ChatService {
     return this.cachePolicyState.map.get(toolName);
   }
 
+  /** Cheap, memoized hash of the connected landscape + object registry. */
+  private landscapeStamp = { at: 0, value: 'none' };
+
+  private async landscapeFingerprint(): Promise<string> {
+    if (Date.now() - this.landscapeStamp.at < 10_000) return this.landscapeStamp.value;
+    let value = 'none';
+    try {
+      const res = await this.db.query<{ stamp: string | null }>(
+        `SELECT md5(
+           COALESCE((SELECT string_agg(id::text || active::text || config::text, ',' ORDER BY id)
+                     FROM connections), '') ||
+           COALESCE((SELECT string_agg(id::text || is_active::text || entity_set, ',' ORDER BY id)
+                     FROM business_objects), '')
+         ) AS stamp`,
+      );
+      value = (res.rows[0]?.stamp || 'none').slice(0, 12);
+    } catch {
+      // Never let cache-keying break a chat turn; a constant key just means the
+      // cache behaves as it did before.
+    }
+    this.landscapeStamp = { at: Date.now(), value };
+    return value;
+  }
+
   private async readToolWithCache(
     toolName: string,
     params: Record<string, unknown>,
     userId?: string,
     orgId?: string | null,
+    full = false,
   ) {
     if (toolName === 'getRecentMovements') {
-      const live = await this.mcp.callTool(toolName, params);
+      const live = await this.mcp.callTool(toolName, params, orgId, full);
       return { data: live, cacheHit: false };
     }
 
     // Live SAP wins over the simulator (Phase AF). Returns null when there is no
     // connected source for this tool/plant, so mock still answers those.
     if (this.live.canServe(toolName)) {
-      const served = await this.live.serve(toolName, params, orgId).catch(() => null);
+      const served = await this.live.serve(toolName, params, orgId, full).catch(() => null);
       if (served) {
         return { data: served, cacheHit: false };
       }

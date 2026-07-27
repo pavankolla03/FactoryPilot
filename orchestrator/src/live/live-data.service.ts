@@ -4,11 +4,26 @@ import { ConnectionsService } from '../connections/connections.service';
 import { RedisService } from '../common/redis.service';
 import { SapIflowClient, type IflowOverride } from '../business-objects/sap-iflow.client';
 
-/** MCP read tools this adapter can serve from live SAP material stock. */
-const LIVE_TOOLS = new Set(['getStockLevel', 'listWarehouseStock', 'getLowStock', 'getWarehouseSummary']);
+/** MCP read tools this adapter can serve from live SAP. */
+const LIVE_TOOLS = new Set([
+  'getStockLevel',
+  'listWarehouseStock',
+  'getLowStock',
+  'getWarehouseSummary',
+  // Phase AN: backed by the material-document and purchase-order iFlows.
+  'getRecentMovements',
+  'getPurchaseOrders',
+]);
 
 /** Enough rows to aggregate a plant truthfully; the result is then summarized. */
 const FETCH_TOP = 1000;
+
+/**
+ * Rows handed to the model per answer. A large plant returns hundreds of
+ * positions (~10k tokens); the model only needs a representative slice plus
+ * accurate totals, and it is always told what was withheld.
+ */
+const RESPONSE_ROW_BUDGET = Number(process.env.LIVE_ROW_BUDGET || 30);
 
 interface StockRow {
   materialId: string;
@@ -30,6 +45,8 @@ export class LiveDataService {
   private readonly logger = new Logger(LiveDataService.name);
   private readonly iflow = new SapIflowClient();
   private cache: { at: number; rows: StockRow[]; fetchedAt: number; degraded: boolean } | null = null;
+  /** Per-business-object raw row cache (movements, purchase orders, …). */
+  private objectCache = new Map<string, { at: number; rows: Array<Record<string, unknown>> }>();
 
   /** Survives restarts, so a SAP outage at boot still has something truthful to serve. */
   private static readonly SNAPSHOT_KEY = 'live:stock:last-known-good';
@@ -124,6 +141,60 @@ export class LiveDataService {
     }
   }
 
+  /**
+   * Fetch any registered business object from the customer's landscape, routed
+   * to the iFlow bound to its entity set. Cached for 60s like stock. Returns
+   * null when nothing live is connected for that object, so the caller falls
+   * back to the simulator rather than showing an empty warehouse.
+   */
+  private async fetchObject(
+    objectCode: string,
+    orgId?: string | null,
+  ): Promise<Array<Record<string, unknown>> | null> {
+    const cached = this.objectCache.get(objectCode);
+    if (cached && Date.now() - cached.at < 60_000) return cached.rows;
+
+    const cfg = await this.db.query<{
+      odata_service_path: string;
+      entity_set: string;
+      select_fields: string | null;
+      top_limit: number;
+    }>(
+      `SELECT odata_service_path, entity_set, select_fields, top_limit FROM business_objects
+       WHERE object_code = $1 AND is_active = true
+       ORDER BY org_id NULLS LAST LIMIT 1`,
+      [objectCode],
+    );
+    const obj = cfg.rows[0];
+    if (!obj) return null;
+
+    const landscape = await this.landscape(orgId, obj.entity_set);
+    if (!landscape) return null;
+
+    try {
+      const result = await this.iflow.query(
+        {
+          service: obj.odata_service_path,
+          entitySet: obj.entity_set,
+          select: obj.select_fields || undefined,
+          top: FETCH_TOP,
+        },
+        landscape,
+      );
+      // A fixed endpoint that quietly serves a different entity set would produce
+      // nonsense downstream; an empty result is treated as "no live source".
+      if (!result.records.length) return null;
+      this.objectCache.set(objectCode, { at: Date.now(), rows: result.records });
+      await this.recordHealth(landscape, true);
+      return result.records;
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : 'unknown';
+      this.logger.warn(`live ${objectCode} fetch failed: ${reason}`);
+      await this.recordHealth(landscape, false, reason);
+      return cached?.rows ?? null;
+    }
+  }
+
   private async saveSnapshot(rows: StockRow[], fetchedAt: number) {
     try {
       await this.redis.raw.setEx(
@@ -188,8 +259,13 @@ export class LiveDataService {
     toolName: string,
     params: Record<string, unknown>,
     orgId?: string | null,
+    /** UI surfaces (the board) render every position; only model payloads are budgeted. */
+    full = false,
   ): Promise<{ structuredContent: Record<string, unknown> } | null> {
     if (!this.canServe(toolName)) return null;
+
+    if (toolName === 'getRecentMovements') return this.serveMovements(params, orgId);
+    if (toolName === 'getPurchaseOrders') return this.servePurchaseOrders(params, orgId);
 
     const live = await this.liveStock(orgId);
     if (!live) return null;
@@ -210,7 +286,12 @@ export class LiveDataService {
       : 'sap-iflow (live)';
 
     if (toolName === 'listWarehouseStock') {
-      return { structuredContent: { records: this.aggregate(scoped), dataSource } };
+      const agg = this.aggregate(scoped);
+      return {
+        structuredContent: full
+          ? { records: agg, rowCount: agg.length, dataSource }
+          : { ...this.budget(agg, warehouseId), dataSource },
+      };
     }
 
     if (toolName === 'getStockLevel') {
@@ -221,11 +302,16 @@ export class LiveDataService {
 
     if (toolName === 'getLowStock') {
       const threshold = Number(params.threshold ?? 50);
-      const records = this.aggregate(scoped)
+      const low = this.aggregate(scoped)
         .filter((r) => r.quantity < threshold)
         .sort((a, b) => a.quantity - b.quantity)
         .map((r) => ({ ...r, description: '', inboundQty: 0 }));
-      return { structuredContent: { records, dataSource } };
+      // Low stock is already the interesting subset; keep the smallest first.
+      return {
+        structuredContent: full
+          ? { records: low, rowCount: low.length, dataSource }
+          : { ...this.budget(low, warehouseId), dataSource },
+      };
     }
 
     // getWarehouseSummary
@@ -245,6 +331,161 @@ export class LiveDataService {
         dataSource,
         note: 'Stock is live from SAP. Movement and purchase-order counts have no live source connected yet.',
       },
+    };
+  }
+
+  /**
+   * Goods movements from A_MaterialDocumentItem. The entity exposes no posting
+   * timestamp (that lives on the document header), so the `sinceHours` window
+   * cannot be honoured — we say so instead of inventing dates or silently
+   * returning everything as if it were recent.
+   */
+  private async serveMovements(
+    params: Record<string, unknown>,
+    orgId?: string | null,
+  ): Promise<{ structuredContent: Record<string, unknown> } | null> {
+    const rows = await this.fetchObject('GOODS_MOVEMENT', orgId);
+    if (!rows) return null;
+
+    const warehouseId = params.warehouseId ? String(params.warehouseId) : undefined;
+    const scoped = warehouseId ? rows.filter((r) => String(r.Plant ?? '') === warehouseId) : rows;
+    if (!scoped.length) return null;
+
+    const records = scoped.map((r) => {
+      // 'S' debits the location (receipt), 'H' credits it (issue).
+      const isReceipt = String(r.DebitCreditCode ?? 'S') === 'S';
+      const location = String(r.StorageLocation ?? '') || 'unassigned';
+      const counterparty = String(r.IssuingOrReceivingStorageLoc ?? '') || 'external';
+      return {
+        movementId: `${r.MaterialDocument ?? ''}/${r.MaterialDocumentItem ?? ''}`,
+        productId: String(r.Material ?? ''),
+        materialId: String(r.Material ?? ''),
+        warehouseId: String(r.Plant ?? ''),
+        fromLocation: isReceipt ? counterparty : location,
+        toLocation: isReceipt ? location : counterparty,
+        qty: Math.abs(Number(r.QuantityInBaseUnit ?? 0)),
+        unit: String(r.MaterialBaseUnit ?? ''),
+        movementType: String(r.GoodsMovementType ?? ''),
+        direction: isReceipt ? 'receipt' : 'issue',
+        fiscalPeriod: String(r.FiscalYearPeriod ?? r.MaterialDocumentYear ?? ''),
+        status: 'confirmed' as const,
+      };
+    });
+
+    const budgeted = records.length > RESPONSE_ROW_BUDGET ? records.slice(0, RESPONSE_ROW_BUDGET) : records;
+    return {
+      structuredContent: {
+        records: budgeted,
+        rowCount: records.length,
+        ...(budgeted.length < records.length
+          ? { truncated: { shown: budgeted.length, total: records.length } }
+          : {}),
+        dataSource: 'sap-iflow (live)',
+        note:
+          `${records.length} goods movements from SAP material documents. This SAP entity does not expose a posting ` +
+          `timestamp, so the requested time window was NOT applied — do not describe these as "last 24 hours". ` +
+          `Use fiscalPeriod for recency.`,
+      },
+    };
+  }
+
+  /**
+   * Purchase orders from A_PurchaseOrder. The customer's iFlow serves the header
+   * entity only, so there is no material, plant or quantity per line — the tool
+   * reports supplier and dates and is explicit about the missing item detail.
+   */
+  private async servePurchaseOrders(
+    params: Record<string, unknown>,
+    orgId?: string | null,
+  ): Promise<{ structuredContent: Record<string, unknown> } | null> {
+    const rows = await this.fetchObject('PURCHASING', orgId);
+    if (!rows) return null;
+
+    const records = rows.map((r) => ({
+      poNumber: String(r.PurchaseOrder ?? ''),
+      supplier: String(r.Supplier ?? ''),
+      companyCode: String(r.CompanyCode ?? ''),
+      purchasingGroup: String(r.PurchasingGroup ?? ''),
+      purchasingOrganization: String(r.PurchasingOrganization ?? ''),
+      orderType: String(r.PurchaseOrderType ?? ''),
+      currency: String(r.DocumentCurrency ?? ''),
+      orderedAt: String(r.PurchaseOrderDate ?? r.CreationDate ?? ''),
+      createdBy: String(r.CreatedByUser ?? ''),
+      status: String(r.PurchasingProcessingStatus ?? '') || 'unknown',
+    }));
+
+    const warehouseId = params.warehouseId ? String(params.warehouseId) : undefined;
+
+    // Header data has no plant. Prose caveats did not hold — the model still
+    // reported these as "plant 1030's open POs" — so a plant-scoped request gets
+    // no row list at all. Nothing to tabulate means nothing to misattribute.
+    if (warehouseId) {
+      return {
+        structuredContent: {
+          unavailable: true,
+          reason:
+            `Purchase orders cannot be listed per plant. The connected SAP iFlow serves purchase order ` +
+            `HEADERS only, which carry no plant, material or quantity, so there is no way to tell which ` +
+            `of them belong to plant ${warehouseId}. Tell the user this plainly and do not list or count ` +
+            `purchase orders for this plant. Connecting an A_PurchaseOrderItem iFlow would enable it.`,
+          purchaseOrderHeadersAvailableAcrossAllPlants: records.length,
+          dataSource: 'sap-iflow (live)',
+        },
+      };
+    }
+
+    const budgeted = records.length > RESPONSE_ROW_BUDGET ? records.slice(0, RESPONSE_ROW_BUDGET) : records;
+    return {
+      structuredContent: {
+        note:
+          'These are purchase order HEADERS across all plants — no plant, material or quantity is available, ' +
+          'and the status was not filtered, so do not describe them as "open".',
+        containsMaterialOrQuantity: false,
+        dataSource: 'sap-iflow (live)',
+        rowCount: records.length,
+        ...(budgeted.length < records.length
+          ? { truncated: { shown: budgeted.length, total: records.length } }
+          : {}),
+        records: budgeted,
+      },
+    };
+  }
+
+  /**
+   * Cap the rows sent to the model, but never silently: the payload carries the
+   * true totals and says how many rows were withheld, so an aggregate answer
+   * ("how much stock in total") stays correct on a truncated list.
+   */
+  private budget<T extends { quantity: number; location: string; materialId: string }>(
+    rows: T[],
+    warehouseId?: string,
+  ): Record<string, unknown> {
+    const total = rows.length;
+    if (total <= RESPONSE_ROW_BUDGET) {
+      return { records: rows, rowCount: total };
+    }
+    // Keep the largest positions — the ones that matter for stock questions.
+    const shown = [...rows].sort((a, b) => b.quantity - a.quantity).slice(0, RESPONSE_ROW_BUDGET);
+    const byLocation: Record<string, number> = {};
+    for (const r of rows) {
+      byLocation[r.location] = (byLocation[r.location] ?? 0) + r.quantity;
+    }
+    return {
+      records: shown,
+      rowCount: total,
+      truncated: {
+        shown: shown.length,
+        total,
+        withheld: total - shown.length,
+        basis: 'largest quantities first',
+      },
+      totals: {
+        warehouseId: warehouseId ?? null,
+        distinctMaterials: new Set(rows.map((r) => r.materialId)).size,
+        totalQuantity: rows.reduce((sum, r) => sum + r.quantity, 0),
+        byLocation,
+      },
+      note: `Showing ${shown.length} of ${total} positions (largest first). The totals above cover ALL ${total} positions — use them for any aggregate answer.`,
     };
   }
 

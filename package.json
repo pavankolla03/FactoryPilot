@@ -17,6 +17,8 @@
     "build": "npm run build --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
     "eval": "node scripts/agent-eval.mjs",
+    "verify": "npm run typecheck && npm run test",
+    "typecheck": "tsc --noEmit -p orchestrator/tsconfig.json && tsc --noEmit -p frontend/tsconfig.json",
     "lint": "npm run lint --workspaces --if-present",
     "format": "npm run format --workspaces --if-present"
   },

@@ -141,8 +141,13 @@ async function main() {
     await new Promise((resolve) => setTimeout(resolve, 4000));
   }
 
-  console.log(`\n${passed}/${ALL_CASES.length} passed`);
-  if (failures.length > 0) {
+  const rate = passed / ALL_CASES.length;
+  // Free-tier models are flaky; CI can set a threshold (e.g. 0.9) instead of
+  // demanding a perfect run, while the default stays strict.
+  const minRate = Number(process.env.EVAL_MIN_PASS_RATE || 1);
+  console.log(`\n${passed}/${ALL_CASES.length} passed (${Math.round(rate * 100)}%, gate ${Math.round(minRate * 100)}%)`);
+  if (rate < minRate) {
+    console.error(`Eval gate failed: ${Math.round(rate * 100)}% < ${Math.round(minRate * 100)}%`);
     process.exit(1);
   }
 }

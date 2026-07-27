@@ -54,4 +54,13 @@ export class BusinessObjectsController {
   testConnection(@CurrentUser() user: AuthUser, @Param('id') id: string) {
     return this.service.testConnection(user, id);
   }
+
+  /**
+   * Field discovery: fetch a few real rows so a consultant configuring this
+   * object can see which fields SAP actually returns before mapping them.
+   */
+  @Post('/:id/preview')
+  preview(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.service.preview(user, id);
+  }
 }

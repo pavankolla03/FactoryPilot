@@ -12,6 +12,7 @@ export type AgentStep = {
   ms?: number;
   cacheHit?: boolean;
   dataSource?: string;
+  bytes?: number;
   live?: boolean;
   status: 'running' | 'ok' | 'error' | 'pending';
 };
@@ -343,6 +344,11 @@ function StepRow({ step, showArgs }: { step: AgentStep; showArgs?: boolean }) {
         {step.cacheHit && <span className="activity-chip text-fp-accent">cache</span>}
         {step.live === true && <span className="activity-chip text-fp-good" title={step.dataSource}>live SAP</span>}
         {step.live === false && <span className="activity-chip text-fp-warn" title={step.dataSource}>sim</span>}
+        {typeof step.bytes === 'number' && step.bytes > 0 && (
+          <span className="activity-chip text-fp-muted" title="Payload size read by the model">
+            {step.bytes < 1024 ? `${step.bytes} B` : `${(step.bytes / 1024).toFixed(1)} KB`}
+          </span>
+        )}
         <span className="ml-auto shrink-0 text-[11px] tabular-nums text-[#A5A294]">
           {step.status === 'running'
             ? 'running…'
