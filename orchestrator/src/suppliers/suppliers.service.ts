@@ -14,8 +14,10 @@ export interface SupplierScorecard {
   openPOs: number;
   overduePOs: number;
   qtyOnOrder: number;
-  reliabilityScore: number;
-  band: 'reliable' | 'watch' | 'at-risk';
+  /** Null when the landscape supplies no signal to score on — unknown, not bad. */
+  reliabilityScore: number | null;
+  band: 'reliable' | 'watch' | 'at-risk' | null;
+  scoreUnavailableReason?: string | null;
 }
 
 type Rec = Record<string, unknown>;
@@ -54,11 +56,17 @@ export class SuppliersService {
   async scorecards(user: AuthUser): Promise<SupplierScorecard[]> {
     const master = this.records(await this.mcp.callTool('getSuppliers', {}).catch(() => null));
 
-    // All POs across in-scope warehouses (dedup by poNumber).
+    // All POs (dedup by poNumber). Live SAP purchase order headers carry no
+    // plant, so a per-warehouse loop returns nothing at all — ask once without
+    // a warehouse and fall back to the per-warehouse sweep for simulator data.
     const poByNumber = new Map<string, Rec>();
-    for (const wh of await this.scopedWarehouses(user)) {
-      const pos = this.records(await this.mcp.callTool('getPurchaseOrders', { warehouseId: wh }).catch(() => null));
-      for (const po of pos) poByNumber.set(String(po.poNumber ?? Math.random()), po);
+    const unscoped = this.records(await this.mcp.callTool('getPurchaseOrders', {}).catch(() => null));
+    for (const po of unscoped) poByNumber.set(String(po.poNumber ?? Math.random()), po);
+    if (!poByNumber.size) {
+      for (const wh of await this.scopedWarehouses(user)) {
+        const pos = this.records(await this.mcp.callTool('getPurchaseOrders', { warehouseId: wh }).catch(() => null));
+        for (const po of pos) poByNumber.set(String(po.poNumber ?? Math.random()), po);
+      }
     }
     const pos = [...poByNumber.values()];
 
@@ -80,14 +88,19 @@ export class SuppliersService {
       bySupplier.set(name, agg);
     }
 
-    // Every supplier from the master, plus any PO supplier not in the master.
-    const names = new Set<string>([...master.map((m) => String(m.name ?? '')), ...bySupplier.keys()].filter(Boolean));
+    // Key on whatever identifies the supplier in this landscape: live SAP gives
+    // an ID and no name, the simulator gives a name and no ID.
+    const keyOf = (r: Rec) => String(r.supplierId ?? r.name ?? '').trim();
+    const keys = new Set<string>([...master.map(keyOf), ...bySupplier.keys()].filter(Boolean));
 
     const cards: SupplierScorecard[] = [];
-    for (const name of names) {
-      const m = master.find((x) => String(x.name ?? '') === name);
-      const agg = bySupplier.get(name) ?? { open: 0, overdue: 0, qty: 0, leadDays: [] };
-      const onTime = m?.onTimeRatePct !== undefined ? Number(m.onTimeRatePct) : null;
+    for (const key of keys) {
+      const m = master.find((x) => keyOf(x) === key);
+      const agg = bySupplier.get(key) ?? { open: 0, overdue: 0, qty: 0, leadDays: [] };
+      const onTime =
+        m?.onTimeRatePct !== undefined && m.onTimeRatePct !== null ? Number(m.onTimeRatePct) : null;
+      const declaredLead =
+        m?.leadTimeDays !== undefined && m.leadTimeDays !== null ? Number(m.leadTimeDays) : null;
       const promisedLead = agg.leadDays.length
         ? Math.round(agg.leadDays.reduce((s, v) => s + v, 0) / agg.leadDays.length)
         : null;
@@ -95,29 +108,52 @@ export class SuppliersService {
       // Reliability: the supplier's on-time rate is the stable signal; long lead
       // times and current overdue POs are smaller, count-based nudges (so one late
       // PO can't sink an otherwise-reliable supplier below a chronically weak one).
-      const base = onTime ?? 80;
-      const leadDays = m?.leadTimeDays !== undefined ? Number(m.leadTimeDays) : (promisedLead ?? 10);
-      const leadPenalty = Math.min(10, Math.max(0, leadDays - 10) * 0.6);
-      const overduePenalty = Math.min(20, agg.overdue * 8);
-      const reliabilityScore = Math.max(0, Math.min(100, Math.round(base - leadPenalty - overduePenalty)));
+      //
+      // With none of those signals present — live SAP PO headers carry no
+      // delivery date, status or quantity — there is nothing to score. Emitting
+      // the old default of 80 gave every supplier an identical "reliable" badge
+      // that looked measured, so the score is left null instead.
+      const hasSignal = onTime !== null || declaredLead !== null || promisedLead !== null || agg.overdue > 0;
+      const leadDays = declaredLead ?? promisedLead ?? 10;
+      const reliabilityScore = hasSignal
+        ? Math.max(
+            0,
+            Math.min(
+              100,
+              Math.round(
+                (onTime ?? 80) -
+                  Math.min(10, Math.max(0, leadDays - 10) * 0.6) -
+                  Math.min(20, agg.overdue * 8),
+              ),
+            ),
+          )
+        : null;
 
       cards.push({
-        supplierId: m?.supplierId ? String(m.supplierId) : null,
-        name,
+        supplierId: m?.supplierId ? String(m.supplierId) : /^\d|-/.test(key) ? key : null,
+        name: m?.name ? String(m.name) : key,
         country: m?.country ? String(m.country) : null,
         onTimeRatePct: onTime,
-        leadTimeDays: m?.leadTimeDays !== undefined ? Number(m.leadTimeDays) : null,
+        leadTimeDays: declaredLead,
         promisedLeadDays: promisedLead,
         openPOs: agg.open,
         overduePOs: agg.overdue,
         qtyOnOrder: agg.qty,
         reliabilityScore,
-        band: this.bandOf(reliabilityScore),
+        band: reliabilityScore === null ? null : this.bandOf(reliabilityScore),
+        scoreUnavailableReason: hasSignal
+          ? null
+          : 'No delivery dates, statuses or quantities are available for this supplier — ' +
+            'the connected SAP iFlow serves purchase order headers only.',
       });
     }
 
-    // Worst-first, but suppliers with open exposure rank above idle ones at equal score.
-    return cards.sort((a, b) => a.reliabilityScore - b.reliabilityScore || b.openPOs - a.openPOs);
+    // Worst-first, but suppliers with open exposure rank above idle ones at equal
+    // score. Unscored suppliers sort last: they are unknown, not bad.
+    return cards.sort(
+      (a, b) =>
+        (a.reliabilityScore ?? 101) - (b.reliabilityScore ?? 101) || b.openPOs - a.openPOs,
+    );
   }
 
   /** Lead time to use for reorder-point math for a given supplier (measured, else declared). */

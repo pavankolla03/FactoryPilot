@@ -1608,17 +1608,34 @@ export class ChatService {
       try {
         const cards = await this.suppliers.scorecards(user);
         if (cards.length) {
-          const top = cards[0];
-          const text =
-            `**${top.name}** is the biggest reliability risk: **${top.reliabilityScore}/100 (${top.band})** — ` +
-            `on-time ${top.onTimeRatePct ?? '—'}%, lead time ${top.leadTimeDays ?? '—'}d` +
-            `${top.overduePOs ? `, ${top.overduePOs} overdue PO(s)` : ''}.\n\n` +
-            'Worst-ranked suppliers:\n' +
-            cards
-              .slice(0, 5)
-              .map((c) => `- **${c.name}** — ${c.reliabilityScore}/100 (${c.band}); on-time ${c.onTimeRatePct ?? '—'}%, lead ${c.leadTimeDays ?? '—'}d${c.overduePOs ? `, ${c.overduePOs} overdue` : ''}`)
-              .join('\n') +
-            '\n\n**What to do:** line up a backup source for the top risk and tighten PO follow-up on overdue orders.';
+          const scored = cards.filter((c) => c.reliabilityScore !== null);
+          const line = (c: (typeof cards)[number]) =>
+            `- **${c.name}** — ` +
+            (c.reliabilityScore === null
+              ? `not scored; ${c.openPOs} purchase order(s)`
+              : `${c.reliabilityScore}/100 (${c.band}); on-time ${c.onTimeRatePct ?? '—'}%, lead ${c.leadTimeDays ?? '—'}d${c.overduePOs ? `, ${c.overduePOs} overdue` : ''}`);
+
+          // Every supplier can be unscored when the landscape has no delivery
+          // dates or statuses — say so rather than naming a "biggest risk" that
+          // was never measured.
+          const text = scored.length
+            ? `**${scored[0].name}** is the biggest reliability risk: ` +
+              `**${scored[0].reliabilityScore}/100 (${scored[0].band})** — ` +
+              `on-time ${scored[0].onTimeRatePct ?? '—'}%, lead time ${scored[0].leadTimeDays ?? '—'}d` +
+              `${scored[0].overduePOs ? `, ${scored[0].overduePOs} overdue PO(s)` : ''}.\n\n` +
+              'Worst-ranked suppliers:\n' +
+              cards.slice(0, 5).map(line).join('\n') +
+              '\n\n**What to do:** line up a backup source for the top risk and tighten PO follow-up on overdue orders.'
+            : `Reliability cannot be scored for any of the ${cards.length} supplier(s) yet. ` +
+              `${cards[0].scoreUnavailableReason ?? 'No delivery dates, statuses or quantities are available.'}\n\n` +
+              'Suppliers by purchase order volume:\n' +
+              cards
+                .slice()
+                .sort((a, b) => b.openPOs - a.openPOs)
+                .slice(0, 5)
+                .map(line)
+                .join('\n') +
+              '\n\n**What to do:** connect an `A_PurchaseOrderItem` iFlow to get delivery dates and quantities — that is what reliability scoring needs.';
           return this.emitFallbackText(user, convId, message, start, text, ['getSupplierScorecards']);
         }
       } catch {

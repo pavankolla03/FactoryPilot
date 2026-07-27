@@ -12,11 +12,12 @@ type Scorecard = {
   openPOs: number;
   overduePOs: number;
   qtyOnOrder: number;
-  reliabilityScore: number;
-  band: 'reliable' | 'watch' | 'at-risk';
+  reliabilityScore: number | null;
+  scoreUnavailableReason?: string | null;
+  band: 'reliable' | 'watch' | 'at-risk' | null;
 };
 
-const BAND_CHIP: Record<Scorecard['band'], string> = {
+const BAND_CHIP: Record<NonNullable<Scorecard['band']>, string> = {
   reliable: 'bg-fp-good-soft text-fp-good',
   watch: 'bg-fp-warn-soft text-fp-warn',
   'at-risk': 'bg-fp-bad-soft text-fp-bad',
@@ -105,9 +106,15 @@ export function SuppliersCard({
                   </div>
                 </td>
                 <td className="px-3 py-2">
-                  <span className={`chip ${BAND_CHIP[s.band]}`}>
-                    {s.reliabilityScore} · {s.band}
-                  </span>
+                  {s.reliabilityScore === null || s.band === null ? (
+                    <span className="chip bg-fp-surface-2 text-fp-ink-3" title={s.scoreUnavailableReason ?? undefined}>
+                      not scored
+                    </span>
+                  ) : (
+                    <span className={`chip ${BAND_CHIP[s.band]}`}>
+                      {s.reliabilityScore} · {s.band}
+                    </span>
+                  )}
                 </td>
                 <td className="px-3 py-2 tabular-nums">{s.onTimeRatePct !== null ? `${s.onTimeRatePct}%` : '—'}</td>
                 <td className="px-3 py-2 tabular-nums">
