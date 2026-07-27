@@ -21,7 +21,7 @@ import { StockoutService } from '../stockout/stockout.service';
 import { EsgService } from '../esg/esg.service';
 import { LiveDataService } from '../live/live-data.service';
 import { LiveWriteService } from '../live/live-write.service';
-import { hydrateModelOutcomes, reportModelOutcome } from '../llm/openrouter-provider';
+import { hydrateModelOutcomes, isAccountWideLimit, reportModelOutcome } from '../llm/openrouter-provider';
 import { openSecret } from '../common/secret-box';
 import type { UserModelConfig } from '../llm/custom-provider';
 import type { NormalizedToolCall } from '../llm/types';
@@ -426,7 +426,7 @@ export class ChatService {
             this.realtime.emitChatStatus(user.id, { conversationId: convId, kind: 'stream_reset' });
             streamedChars = 0;
           }
-          return this.handleFallbackWithoutLlm(user, convId, message, start, invokedTools);
+          return this.handleFallbackWithoutLlm(user, convId, message, start, invokedTools, reason);
         }
         llmMs += Date.now() - llmStart;
 
@@ -537,6 +537,9 @@ export class ChatService {
               live: ds ? isLive : undefined,
               // What this tool actually cost the model to read (Phase AM).
               bytes: toolContent.length,
+              // Phase AQ: the evidence trail — which endpoint answered and what
+              // it returned, so a user can expand any step and check the source.
+              detail: this.toolDetail(data),
               status: 'ok',
             };
             toolEvents.push(event);
@@ -1545,6 +1548,70 @@ export class ChatService {
     );
   }
 
+  /**
+   * What to say when no model answered. The old text named a material that does
+   * not exist in the customer's SAP ("MAT-10023456") and hid the reason, so the
+   * user could neither act on it nor tell a quota problem from an outage.
+   *
+   * This states the real cause and offers examples built from the plants that
+   * are actually connected.
+   */
+  private async buildNoLlmMessage(user: AuthUser, llmError?: string): Promise<string> {
+    const reason = llmError ?? '';
+    const cause = isAccountWideLimit(reason)
+      ? "**Your OpenRouter free-tier daily request limit is used up.** Every free model shares that one " +
+        'account-wide cap, so switching models will not help until it resets (midnight UTC). To keep going now: ' +
+        'add credits at openrouter.ai, or connect your own model under Access Control → My models.'
+      : reason
+        ? `The language model did not respond: \`${reason.slice(0, 160)}\`.`
+        : 'The language model is not reachable right now.';
+
+    let examples = '';
+    try {
+      const plants = await this.live.livePlants(user.orgId);
+      if (plants.length) {
+        const p = plants[0];
+        examples =
+          '\n\nI can still answer these directly from SAP without the model:\n' +
+          `- *"stock in plant ${p}"*\n` +
+          `- *"which materials are running low in plant ${p}?"*\n` +
+          `- *"goods movements in plant ${p}"*\n` +
+          '- *"which suppliers do we buy from?"*\n' +
+          '- *"what iFlows are connected?"*';
+      }
+    } catch {
+      /* examples are a bonus; the cause above is the point */
+    }
+
+    return `${cause}${examples}`;
+  }
+
+  /**
+   * Pull the evidence out of a tool result for the activity timeline: the
+   * endpoint that answered, how many rows it really returned, and a couple of
+   * real rows. Deliberately small — this is a receipt, not the payload.
+   */
+  private toolDetail(data: unknown): ChatToolEvent['detail'] {
+    const sc = (data as { structuredContent?: Record<string, unknown> })?.structuredContent;
+    if (!sc || typeof sc !== 'object') return undefined;
+
+    const records = Array.isArray(sc.records) ? (sc.records as Array<Record<string, unknown>>) : [];
+    const truncated = sc.truncated as { total?: number } | undefined;
+    const detail: NonNullable<ChatToolEvent['detail']> = {};
+
+    if (typeof sc.endpoint === 'string') detail.endpoint = sc.endpoint;
+    if (typeof sc.entitySet === 'string') detail.entitySet = sc.entitySet;
+    const total = truncated?.total ?? (typeof sc.rowCount === 'number' ? sc.rowCount : records.length);
+    if (typeof total === 'number') detail.rowCount = total;
+    if (records.length) {
+      // Two rows is enough to show the shape without re-sending the payload.
+      detail.sample = records.slice(0, 2);
+    }
+    if (sc.unavailable && typeof sc.reason === 'string') detail.unavailableReason = sc.reason;
+
+    return Object.keys(detail).length ? detail : undefined;
+  }
+
   /** Emit a grounded, LLM-free assistant answer (used by the fallback intents). */
   private async emitFallbackText(
     user: AuthUser,
@@ -1553,11 +1620,39 @@ export class ChatService {
     start: number,
     text: string,
     tools: string[],
+    /** Evidence for the activity trail: these answers still hit real SAP endpoints. */
+    detail?: ChatToolEvent['detail'],
   ): Promise<ChatResponse> {
     await this.insertMessage(convId, 'assistant', text);
     const msgId = randomUUID();
     this.realtime.emitChatToken(user.id, { conversationId: convId, delta: text });
-    this.realtime.emitChatDone(user.id, { conversationId: convId, messageId: msgId, source: 'live', grounded: true });
+    // These grounded answers previously emitted no tool events, so when the
+    // model was unavailable the user saw a confident answer with no trail at
+    // all — even though an iFlow had genuinely been called.
+    const toolEvents: ChatToolEvent[] = tools.map((tool, i) => ({
+      id: `${msgId}-${i}`,
+      tool,
+      server: 'orchestrator',
+      ms: Date.now() - start,
+      dataSource: detail?.endpoint ? 'sap-iflow (live)' : undefined,
+      live: detail?.endpoint ? true : undefined,
+      detail,
+      status: 'ok' as const,
+    }));
+    this.realtime.emitChatDone(user.id, {
+      conversationId: convId,
+      messageId: msgId,
+      source: 'live',
+      grounded: true,
+      stats: {
+        elapsedMs: Date.now() - start,
+        rounds: 0,
+        toolCount: toolEvents.length,
+        model: 'grounded (no model needed)',
+        tokens: 0,
+      },
+      toolEvents,
+    });
     await this.writeSessionLog({
       userId: user.id,
       conversationId: convId,
@@ -1577,6 +1672,8 @@ export class ChatService {
     message: string,
     start: number,
     invokedTools: string[],
+      /** Why the model was unavailable, so the user is told something actionable. */
+    llmError?: string,
   ): Promise<ChatResponse> {
     const lower = message.toLowerCase();
 
@@ -1718,6 +1815,54 @@ export class ChatService {
       }
     }
 
+    // "list the names of iFlows you have" is a question about the connected
+    // landscape, not about SAP data. It should never have needed a model.
+    if (/iflow|integration flow|connection|connected system|endpoint/.test(lower)) {
+      try {
+        const rows = await this.db.query<{
+          name: string;
+          kind: string;
+          active: boolean;
+          status: string;
+          entity_set: string | null;
+          url: string | null;
+        }>(
+          `SELECT name, kind, active, status,
+                  config->>'probeEntitySet' AS entity_set,
+                  COALESCE(config->>'url', config->>'baseUrl') AS url
+           FROM connections
+           WHERE org_id IS NULL OR org_id = $1
+           ORDER BY kind, name`,
+          [user.orgId ?? null],
+        );
+        if (rows.rows.length) {
+          const text =
+            `You have **${rows.rows.length} connection(s)** registered:\n\n` +
+            rows.rows
+              .map((r) => {
+                const state = !r.active ? 'inactive' : r.status === 'ok' ? 'connected' : r.status;
+                const serves = r.entity_set ? ` — serves \`${r.entity_set}\`` : '';
+                const path = r.url ? `\n  \`${r.url.replace(/^https?:\/\/[^/]+/, '')}\`` : '';
+                return `- **${r.name}** (${r.kind}, ${state})${serves}${path}`;
+              })
+              .join('\n') +
+            '\n\nAsk me about any of these, or manage them under Connections.';
+          return this.emitFallbackText(user, convId, message, start, text, ['listConnections']);
+        }
+        return this.emitFallbackText(
+          user,
+          convId,
+          message,
+          start,
+          'No SAP connections are registered yet. Add one under Connections → iFlow (read) and I will start ' +
+            'answering from your real landscape instead of simulated data.',
+          ['listConnections'],
+        );
+      } catch {
+        /* fall through */
+      }
+    }
+
     if (lower.includes('supplier')) {
       try {
         const cards = await this.suppliers.scorecards(user);
@@ -1783,7 +1928,12 @@ export class ChatService {
                     `| ${r.Material ?? '—'} | ${r.StorageLocation ?? '—'} | ${r.MatlWrhsStkQtyInMatlBaseUnit ?? '—'} | ${r.MaterialBaseUnit ?? '—'} | ${r.Batch || '—'} |`,
                 )
                 .join('\n');
-            return this.emitFallbackText(user, convId, message, start, header + table, ['queryBusinessObject']);
+            return this.emitFallbackText(user, convId, message, start, header + table, ['queryBusinessObject'], {
+              endpoint: result.endpoint,
+              entitySet: result.entitySet,
+              rowCount: result.rowCount ?? rows.length,
+              sample: rows.slice(0, 2),
+            });
           }
         }
       } catch {
@@ -1846,8 +1996,7 @@ export class ChatService {
       }
     }
 
-    const fallbackText =
-      "I couldn't use the configured LLM right now. Try a structured command like: show stock for material MAT-10023456 in warehouse 1010.";
+    const fallbackText = await this.buildNoLlmMessage(user, llmError);
     await this.insertMessage(convId, 'assistant', fallbackText);
     const msgId = randomUUID();
     this.realtime.emitChatToken(user.id, { conversationId: convId, delta: fallbackText });

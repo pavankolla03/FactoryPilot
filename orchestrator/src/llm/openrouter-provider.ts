@@ -79,6 +79,15 @@ function isSimpleQuery(messages: { role: string; content: string }[]): boolean {
   return lastUser.content.length < 120 && !COMPLEX_HINTS.test(lastUser.content);
 }
 
+/**
+ * True when the failure is a quota the whole API key shares, so retrying a
+ * different model cannot help. Exported so the chat layer can turn it into an
+ * explanation the user can act on rather than a generic "LLM unavailable".
+ */
+export function isAccountWideLimit(reason: string): boolean {
+  return /free-models-per-day|free-models-per-min|insufficient credits|quota exceeded|402/i.test(reason);
+}
+
 export class OpenRouterProvider implements ILLMProvider {
   private readonly logger = new Logger(OpenRouterProvider.name);
   private readonly client: OpenAI;
@@ -182,6 +191,14 @@ export class OpenRouterProvider implements ILLMProvider {
         lastError = error;
         this.cooldownUntil.set(model, Date.now() + COOLDOWN_MS);
         const reason = error instanceof Error ? error.message : 'unknown error';
+
+        // OpenRouter's free-tier cap is per ACCOUNT per day, not per model, so
+        // every remaining free model is guaranteed to return the same 429.
+        // Walking the rest of the chain just spends ~5s per model to fail.
+        if (isAccountWideLimit(reason)) {
+          this.logger.warn(`OpenRouter account-wide free-tier limit reached on ${model}; not trying the rest`);
+          throw error;
+        }
         this.logger.warn(`Model ${model} failed (${reason}); trying next in chain`);
       }
     }

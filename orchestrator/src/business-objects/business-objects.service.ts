@@ -262,6 +262,8 @@ export class BusinessObjectsService {
     objectCode: string;
     objectName: string;
     dataSource: string;
+    endpoint?: string;
+    entitySet?: string;
     summary: BusinessObjectSummary;
     records: Array<Record<string, unknown>>;
     rowCount?: number;
@@ -326,6 +328,9 @@ export class BusinessObjectsService {
       objectCode: cfg.object_code,
       objectName: cfg.object_name,
       dataSource: result!.dataSource,
+      // Evidence trail for the activity timeline (Phase AQ).
+      endpoint: result!.endpoint,
+      entitySet: cfg.entity_set,
       summary,
       rowCount: records.length,
       ...(shown.length < records.length

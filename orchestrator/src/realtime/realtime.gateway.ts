@@ -22,6 +22,21 @@ export type ChatToolEvent = {
   live?: boolean;
   /** Serialized payload size handed to the model, in bytes. */
   bytes?: number;
+  /**
+   * Expandable request detail, so a user can see exactly which endpoint was
+   * called and what came back — the "why should I believe this answer" trail.
+   */
+  detail?: {
+    /** Endpoint actually hit, e.g. the iFlow URL path. */
+    endpoint?: string;
+    entitySet?: string;
+    /** Rows SAP returned, before any row budget was applied. */
+    rowCount?: number;
+    /** A few real rows from the response. */
+    sample?: Array<Record<string, unknown>>;
+    /** Set when the payload could not answer the question as asked. */
+    unavailableReason?: string;
+  };
   status: 'ok' | 'error' | 'pending';
 };
 

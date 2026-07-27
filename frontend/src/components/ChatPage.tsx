@@ -13,6 +13,13 @@ export type AgentStep = {
   cacheHit?: boolean;
   dataSource?: string;
   bytes?: number;
+  detail?: {
+    endpoint?: string;
+    entitySet?: string;
+    rowCount?: number;
+    sample?: Array<Record<string, unknown>>;
+    unavailableReason?: string;
+  };
   live?: boolean;
   status: 'running' | 'ok' | 'error' | 'pending';
 };
@@ -360,6 +367,39 @@ function StepRow({ step, showArgs }: { step: AgentStep; showArgs?: boolean }) {
         </span>
       </div>
       {args && <div className="ml-6 mt-0.5 truncate text-[11px] text-[#A5A294]">{args}</div>}
+      {step.detail && (
+        <details className="ml-6 mt-1 group">
+          <summary className="cursor-pointer list-none text-[11px] text-[#A5A294] hover:text-fp-ink-3">
+            <span className="inline-block transition-transform group-open:rotate-90">›</span>{' '}
+            {step.detail.rowCount != null ? `${step.detail.rowCount} row(s) from SAP` : 'request detail'}
+          </summary>
+          <div className="mt-1.5 space-y-1.5 rounded-lg border border-fp-line bg-fp-surface-2/50 p-2.5 text-[11px]">
+            {step.detail.endpoint && (
+              <div>
+                <span className="text-[#A5A294]">Endpoint</span>
+                <div className="mt-0.5 break-all font-mono text-[10.5px] text-fp-ink-3">{step.detail.endpoint}</div>
+              </div>
+            )}
+            {step.detail.entitySet && (
+              <div>
+                <span className="text-[#A5A294]">Entity set</span>{' '}
+                <span className="font-mono text-[10.5px] text-fp-ink-3">{step.detail.entitySet}</span>
+              </div>
+            )}
+            {step.detail.unavailableReason && (
+              <div className="text-fp-warn">{step.detail.unavailableReason}</div>
+            )}
+            {step.detail.sample?.length ? (
+              <div>
+                <span className="text-[#A5A294]">Response sample</span>
+                <pre className="mt-0.5 max-h-44 overflow-auto rounded bg-fp-surface p-2 font-mono text-[10px] leading-relaxed text-fp-ink-3">
+{JSON.stringify(step.detail.sample, null, 2)}
+                </pre>
+              </div>
+            ) : null}
+          </div>
+        </details>
+      )}
     </div>
   );
 }

@@ -23,6 +23,8 @@ export interface ODataResult {
   records: Array<Record<string, unknown>>;
   dataSource: string;
   mode: 'iflow' | 's4hana' | 'simulator';
+  /** The URL actually requested, shown in the chat activity trail (Phase AQ). */
+  endpoint?: string;
 }
 
 type AuthMode = 'basic' | 'apikey' | 'oauth2' | 'none';
@@ -290,7 +292,7 @@ export class SapIflowClient {
       }
       const norm = await this.readBody(res);
       const records = fixed ? this.applyClientSide(norm.records, q) : norm.records;
-      return { records, dataSource: norm.dataSource ?? 'sap-iflow', mode: 'iflow' };
+      return { records, dataSource: norm.dataSource ?? 'sap-iflow', mode: 'iflow', endpoint: iflowUrl };
     }
 
     // Direct S/4HANA / Business Accelerator Hub OData (no iFlow registered).
@@ -306,7 +308,7 @@ export class SapIflowClient {
         throw new Error(`SAP returned ${res.status}${text ? ` — ${text.slice(0, 160)}` : ''}`);
       }
       const norm = await this.readBody(res);
-      return { records: norm.records, dataSource: 'sap-s4hana', mode: 's4hana' };
+      return { records: norm.records, dataSource: 'sap-s4hana', mode: 's4hana', endpoint: url.toString() };
     }
 
     // Fallback: local simulator generic passthrough.
@@ -316,7 +318,12 @@ export class SapIflowClient {
       throw new Error(body.error?.message || `business object query failed (${res.status})`);
     }
     const norm = this.normalize(await res.json());
-    return { records: norm.records, dataSource: norm.dataSource ?? 'simulator', mode: 'simulator' };
+    return {
+      records: norm.records,
+      dataSource: norm.dataSource ?? 'simulator',
+      mode: 'simulator',
+      endpoint: `${this.simulatorBase}/iflow/odata`,
+    };
   }
 
   private buildGetUrl(base: string, q: ODataQuery): URL {
