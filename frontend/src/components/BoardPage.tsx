@@ -65,10 +65,17 @@ export function BoardPage({
     void load();
   }, [load]);
 
-  const locations = [
-    ...LOCATION_ORDER,
-    ...[...new Set(records.map((r) => r.location))].filter((l) => !LOCATION_ORDER.includes(l)),
-  ];
+  // Lanes follow the data. LOCATION_ORDER is the simulator's demo flow
+  // (receiving → shipping); a live SAP plant has none of those, so prepending it
+  // unconditionally left five permanently empty lanes filling the first screen
+  // while the real storage locations wrapped onto a second row.
+  const present = new Set(records.map((r) => r.location));
+  const locations = present.size
+    ? [
+        ...LOCATION_ORDER.filter((l) => present.has(l)),
+        ...[...present].filter((l) => !LOCATION_ORDER.includes(l)).sort(),
+      ]
+    : LOCATION_ORDER; // nothing loaded yet — keep the empty board recognisable
 
   async function submitMove() {
     if (!pendingDrop) {
@@ -179,7 +186,9 @@ export function BoardPage({
 
       {error && <div className="rounded-xl bg-fp-bad-soft px-4 py-3 text-sm font-medium text-fp-bad">{error}</div>}
 
-      <div className="grid gap-3 overflow-x-auto md:grid-cols-3 xl:grid-cols-5">
+      {/* Lanes flow to fit however many locations the plant actually has, so a
+          6th or 7th column starts an even row instead of a ragged one. */}
+      <div className="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] items-stretch gap-3">
         {locations.map((location) => {
           const cards = records.filter((r) => r.location === location);
           const total = cards.reduce((sum, c) => sum + c.quantity, 0);

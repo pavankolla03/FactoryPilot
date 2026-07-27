@@ -309,6 +309,18 @@ export class ChatService {
       return { conversationId: convId, messageId: msgId, text: cached.text, source: 'cache', grounded: cached.grounded };
     }
 
+    // Greetings and capability questions need no SAP data and no model. Handled
+    // before the tool catalogue and landscape context are assembled, since
+    // building that prompt is most of the cost of answering "hi".
+    const smalltalk = this.smalltalkReply(message);
+    if (smalltalk) {
+      return this.emitFallbackText(user, convId, message, start, smalltalk, []);
+    }
+    const capability = await this.capabilityReply(message, user.orgId);
+    if (capability) {
+      return this.emitFallbackText(user, convId, message, start, capability, []);
+    }
+
     const tools = [...this.mcp.listTools(), ...LOCAL_TOOLS];
     const prefsRow = await this.db.query<{ preferences: Record<string, string> }>(
       'SELECT preferences FROM users WHERE id = $1',
@@ -1429,6 +1441,68 @@ export class ChatService {
         },
       );
     });
+  }
+
+  /**
+   * Conversational turns that need no SAP data. "hi" was costing ~5k tokens and
+   * ~38s because the whole system prompt, tool catalogue and landscape context
+   * went to the model just to say hello. These are answered instantly for free.
+   *
+   * Patterns are anchored and short so a real question is never hijacked:
+   * "hi" matches, "hi, what stock is in 1010?" does not.
+   */
+  private smalltalkReply(message: string): string | null {
+    const m = message.trim().toLowerCase().replace(/[!.?]+$/, '');
+    if (m.length > 40) return null;
+
+    if (/^(hi|hey|hello|yo|hiya|good (morning|afternoon|evening))( otto)?$/.test(m)) {
+      return (
+        "Hi — I'm Otto, your warehouse copilot.\n\n" +
+        'Ask me about stock, goods movements, purchase orders, physical inventory counts or ' +
+        'suppliers, and I will read them from your connected SAP landscape. I can also draft ' +
+        'stock movements and purchase requisitions — those always come back to you for approval ' +
+        'before anything touches SAP.'
+      );
+    }
+    if (/^(thanks|thank you|thx|ta|cheers|nice|great|perfect|ok|okay|got it)( otto)?$/.test(m)) {
+      return 'Anytime — just ask when you need the next one.';
+    }
+    if (/^(bye|goodbye|see you|later)( otto)?$/.test(m)) {
+      return 'Bye — I will keep watching your stock alerts in the background.';
+    }
+    return null;
+  }
+
+  /**
+   * "What can you do?" answered from the landscape that is actually connected,
+   * rather than letting the model guess at capabilities it may not have.
+   */
+  private async capabilityReply(message: string, orgId?: string | null): Promise<string | null> {
+    const m = message.trim().toLowerCase().replace(/[!.?]+$/, '');
+    if (m.length > 60) return null;
+    if (!/^(what can you do|what do you do|help|what are your (capabilities|features)|who are you)$/.test(m)) {
+      return null;
+    }
+
+    let plants: string[] = [];
+    try {
+      plants = await this.live.livePlants(orgId);
+    } catch {
+      /* capability text is still useful without it */
+    }
+    const live = plants.length
+      ? `**Live from your SAP tenant right now:** plants ${plants.join(', ')}.`
+      : '**No SAP connection is active**, so answers come from simulated data until one is added in Connections.';
+
+    return (
+      "I'm Otto, your warehouse copilot for SAP.\n\n" +
+      '**Ask me about** stock levels and low stock, goods movements, purchase orders and suppliers, ' +
+      'physical inventory counts, warehouse health, stockout risk and slotting.\n\n' +
+      '**I can act** — draft stock movements and purchase requisitions. Every write needs your ' +
+      'approval first, and is logged.\n\n' +
+      `${live}\n\n` +
+      'Try: *"which materials are running low in plant 1710?"* or *"show goods movements in plant 1710"*.'
+    );
   }
 
   /** Emit a grounded, LLM-free assistant answer (used by the fallback intents). */
