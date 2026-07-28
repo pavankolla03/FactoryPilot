@@ -280,7 +280,16 @@ export class AgentsService {
       'plan',
       `Plan: ${suggestions.length} reorder(s) — ` +
         (suggestions.map((s) => `${s.materialId}: order ${s.suggestedOrderQty}`).join(', ') || 'none') +
+        // State what the quantities are actually based on. A target of
+        // threshold*2 is a placeholder, not a calculation, and 30 such lines
+        // read as a costed plan to whoever approves them. Live plants have no
+        // demand history (no posting date in the SAP movement feed), so this is
+        // the normal case there, not an edge case.
         (forecastDriven > 0 ? ` [forecast-driven targets for ${forecastDriven} material(s)]` : '') +
+        (suggestions.length > forecastDriven
+          ? ` [${suggestions.length - forecastDriven} quantity(ies) are a top-up to ${cfg.threshold * 2} ` +
+            `(2x threshold), NOT demand-based — no consumption history is available for this plant]`
+          : '') +
         (skipped.length ? `. Skipped: ${skipped.join('; ')}` : ''),
       'ok',
     );
