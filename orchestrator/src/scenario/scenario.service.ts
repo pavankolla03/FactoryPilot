@@ -58,9 +58,9 @@ export class ScenarioService {
     const supplierDelayDays = Math.min(Math.max(Math.round(opts.supplierDelayDays || 0), 0), 60);
 
     const [stockRes, trendRes, poRes] = await Promise.all([
-      this.mcp.callTool('listWarehouseStock', { warehouseId }).catch(() => null),
+      this.mcp.callTool('listWarehouseStock', { warehouseId }, null, true).catch(() => null),
       this.mcp.callTool('getDemandTrend', { warehouseId, days: 14, byProduct: true }).catch(() => null),
-      this.mcp.callTool('getPurchaseOrders', { warehouseId }).catch(() => null),
+      this.mcp.callTool('getPurchaseOrders', { warehouseId }, null, true).catch(() => null),
     ]);
 
     // On-hand per material.

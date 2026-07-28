@@ -1,0 +1,13 @@
+# Never ship host build output or dependencies into an image. A stale local
+# dist/ was being COPYed in and survived the in-image build, so `docker compose
+# build` silently shipped old code — a health-service change typechecked, built
+# green, and simply was not in the running container.
+node_modules
+**/node_modules
+dist
+**/dist
+*.tsbuildinfo
+**/*.tsbuildinfo
+.git
+graphify-out
+**/.env

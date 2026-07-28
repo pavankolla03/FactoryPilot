@@ -245,8 +245,8 @@ export class AlertsService {
       const movements = (await this.mcp.callTool('getRecentMovements', {
         warehouseId: wh,
         sinceHours: 24,
-      })) as { structuredContent?: { records?: unknown[] } };
-      const low = (await this.mcp.callTool('getLowStock', { warehouseId: wh, threshold: 50 })) as {
+      }, null, true)) as { structuredContent?: { records?: unknown[] } };
+      const low = (await this.mcp.callTool('getLowStock', { warehouseId: wh, threshold: 50 }, null, true)) as {
         structuredContent?: { records?: unknown[] };
       };
       lines.push(
@@ -276,7 +276,7 @@ export class AlertsService {
           const result = (await this.mcp.callTool('getRecentMovements', {
             warehouseId: wh,
             sinceHours: 24,
-          })) as { structuredContent?: { records?: unknown[] } };
+          }, null, true)) as { structuredContent?: { records?: unknown[] } };
           const count = result.structuredContent?.records?.length ?? 0;
           lines.push(`WH ${wh}: ${count} movement${count === 1 ? '' : 's'} in the last 24h`);
         }

@@ -59,7 +59,7 @@ export class SlottingService {
     unavailableReason?: string;
   }> {
     const [stockRes, moves] = await Promise.all([
-      this.mcp.callTool('listWarehouseStock', { warehouseId }).catch(() => null),
+      this.mcp.callTool('listWarehouseStock', { warehouseId }, null, true).catch(() => null),
       this.fetchMovements(warehouseId),
     ]);
     const stock = this.records(stockRes);

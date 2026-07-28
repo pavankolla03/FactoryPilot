@@ -14,6 +14,8 @@ export interface HealthFactor {
   score: number; // 0-100
   weight: number;
   detail: string;
+  /** False when the underlying data does not exist; excluded from the score. */
+  available?: boolean;
 }
 
 export interface WarehouseHealth {
@@ -24,6 +26,10 @@ export interface WarehouseHealth {
   detractor: { label: string; score: number; detail: string } | null;
   factors: HealthFactor[];
   computedAt: string;
+  /** Factors with no underlying data; excluded from `score`. */
+  unmeasuredFactors?: string[];
+  /** Plain-language note on what the score does and does not cover. */
+  scoreBasis?: string;
 }
 
 type Rec = Record<string, unknown>;
@@ -55,11 +61,11 @@ export class HealthService {
   /** Compute a fresh score for one warehouse from live tool data. */
   async computeOne(warehouseId: string): Promise<WarehouseHealth> {
     const [stockRes, lowRes, poRes, trendRes, moveRes] = await Promise.all([
-      this.mcp.callTool('listWarehouseStock', { warehouseId }).catch(() => null),
-      this.mcp.callTool('getLowStock', { warehouseId, threshold: LOW_THRESHOLD }).catch(() => null),
-      this.mcp.callTool('getPurchaseOrders', { warehouseId }).catch(() => null),
+      this.mcp.callTool('listWarehouseStock', { warehouseId }, null, true).catch(() => null),
+      this.mcp.callTool('getLowStock', { warehouseId, threshold: LOW_THRESHOLD }, null, true).catch(() => null),
+      this.mcp.callTool('getPurchaseOrders', { warehouseId }, null, true).catch(() => null),
       this.mcp.callTool('getDemandTrend', { warehouseId, days: 14, byProduct: true }).catch(() => null),
-      this.mcp.callTool('getRecentMovements', { warehouseId, sinceHours: 48 }).catch(() => null),
+      this.mcp.callTool('getRecentMovements', { warehouseId, sinceHours: 48 }, null, true).catch(() => null),
     ]);
 
     const stock = this.records(stockRes);
@@ -129,14 +135,73 @@ export class HealthService {
     const anomalies = median > 0 ? qtys.filter((q) => q >= 5 * median).length : 0;
     const anomalyScore = qtys.length < 3 ? 92 : Math.round(100 * (1 - anomalies / qtys.length));
 
+    // A factor with no data underneath it is NOT a passing factor. Coverage,
+    // PO aging and anomalies all silently defaulted to 90-100 for live SAP
+    // plants — days-of-cover needs demand history, PO aging needs delivery
+    // dates on plant-scoped POs, anomalies need dated movements, and the
+    // connected feeds carry none of those. Plant 1710 scored 76 "watch" with
+    // 80% of the weight coming from data that does not exist, which read as
+    // reassurance rather than ignorance.
+    const haveDemand = trend.length > 0;
+    const havePoDates = openPOs.some((p) => String(p.expectedDelivery ?? '').trim());
+    const haveDatedMoves = moves.some((m) => String(m.timestamp ?? m.postingDate ?? '').trim());
+
     const factors: HealthFactor[] = [
-      { key: 'coverage', label: 'Days of cover', score: coverageScore, weight: 0.4, detail: atRisk === 0 ? 'all materials above 3 days of demand' : `${atRisk} of ${distinct} materials under ${COVER_DAYS_TARGET} days of cover${worstCoverMat ? ` (worst: ${worstCoverMat}, ${worstCover === Infinity ? '∞' : worstCover.toFixed(1)}d)` : ''}` },
-      { key: 'lowStock', label: 'Low stock', score: lowScore, weight: 0.2, detail: low.length + zeroStock === 0 ? 'no positions below threshold' : `${low.length} below ${LOW_THRESHOLD}${zeroStock ? `, ${zeroStock} at zero` : ''}` },
-      { key: 'poAging', label: 'PO aging', score: poScore, weight: 0.2, detail: openPOs.length === 0 ? 'no open purchase orders' : `${overdue.length} of ${openPOs.length} open POs overdue` },
-      { key: 'anomalies', label: 'Movement anomalies', score: anomalyScore, weight: 0.2, detail: anomalies === 0 ? 'movements within normal range' : `${anomalies} unusually large move(s) in 48h` },
+      {
+        key: 'coverage',
+        label: 'Days of cover',
+        score: coverageScore,
+        weight: 0.4,
+        available: haveDemand,
+        detail: !haveDemand
+          ? 'not measurable — no consumption history for this plant (SAP movement feed has no posting date)'
+          : atRisk === 0
+            ? 'all materials above 3 days of demand'
+            : `${atRisk} of ${distinct} materials under ${COVER_DAYS_TARGET} days of cover${worstCoverMat ? ` (worst: ${worstCoverMat}, ${worstCover === Infinity ? '∞' : worstCover.toFixed(1)}d)` : ''}`,
+      },
+      {
+        key: 'lowStock',
+        label: 'Low stock',
+        score: lowScore,
+        weight: 0.2,
+        available: true,
+        detail: low.length + zeroStock === 0 ? 'no positions below threshold' : `${low.length} below ${LOW_THRESHOLD}${zeroStock ? `, ${zeroStock} at zero` : ''}`,
+      },
+      {
+        key: 'poAging',
+        label: 'PO aging',
+        score: poScore,
+        weight: 0.2,
+        available: havePoDates,
+        detail: !havePoDates
+          ? 'not measurable — purchase orders here carry no plant or delivery date'
+          : openPOs.length === 0
+            ? 'no open purchase orders'
+            : `${overdue.length} of ${openPOs.length} open POs overdue`,
+      },
+      {
+        key: 'anomalies',
+        label: 'Movement anomalies',
+        score: anomalyScore,
+        weight: 0.2,
+        available: haveDatedMoves,
+        detail: !haveDatedMoves
+          ? 'not measurable — movements carry no posting date, so no time window applies'
+          : anomalies === 0
+            ? 'movements within normal range'
+            : `${anomalies} unusually large move(s) in 48h`,
+      },
     ];
 
-    const score = Math.round(factors.reduce((s, f) => s + f.score * f.weight, 0));
+    // Average only over factors that could be measured, re-normalising their
+    // weights. Otherwise a plant with one real bad signal and three unmeasurable
+    // ones scores as mostly healthy on the strength of the missing data.
+    const measured = factors.filter((f) => f.available !== false);
+    const measuredWeight = measured.reduce((sum, f) => sum + f.weight, 0);
+    const score = measuredWeight > 0
+      ? Math.round(measured.reduce((sum, f) => sum + f.score * f.weight, 0) / measuredWeight)
+      : 0;
+    const unmeasured = factors.filter((f) => f.available === false).map((f) => f.label);
     const detractorFactor = [...factors].sort((a, b) => a.score - b.score)[0];
     const detractor = detractorFactor.score < 90 ? { label: detractorFactor.label, score: detractorFactor.score, detail: detractorFactor.detail } : null;
 
@@ -148,6 +213,12 @@ export class HealthService {
       detractor,
       factors,
       computedAt: new Date().toISOString(),
+      // Named so the card and Otto can say what the score does not cover.
+      unmeasuredFactors: unmeasured,
+      scoreBasis:
+        unmeasured.length === 0
+          ? 'all four factors measured'
+          : `based on ${measured.length} of ${factors.length} factors — ${unmeasured.join(', ')} could not be measured`,
     };
   }
 

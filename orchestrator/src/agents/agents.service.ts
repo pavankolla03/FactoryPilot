@@ -204,7 +204,7 @@ export class AgentsService {
     const low = (await this.mcp.callTool('getLowStock', {
       warehouseId: cfg.warehouseId,
       threshold: cfg.threshold,
-    })) as { structuredContent?: { records?: Array<Record<string, unknown>> } };
+    }, null, true)) as { structuredContent?: { records?: Array<Record<string, unknown>> } };
     const lowRecords = low.structuredContent?.records ?? [];
     await this.addStep(
       runId,
@@ -223,7 +223,7 @@ export class AgentsService {
 
     // 2. PLAN — combine with inbound POs and existing draft PRs (duplicate guard).
     const [pos, prs] = await Promise.all([
-      this.mcp.callTool('getPurchaseOrders', { warehouseId: cfg.warehouseId }),
+      this.mcp.callTool('getPurchaseOrders', { warehouseId: cfg.warehouseId }, null, true),
       this.mcp.callTool('getPurchaseRequisitions', { warehouseId: cfg.warehouseId }),
     ]);
     const poRecords = ((pos.structuredContent as { records?: Array<Record<string, unknown>> })?.records ??
@@ -423,7 +423,7 @@ export class AgentsService {
     const NETWORK = ['1010', '1020', '1030', '1040', '1050'];
     const stockByWh = new Map<string, Array<Record<string, unknown>>>();
     for (const wh of NETWORK) {
-      const stock = (await this.mcp.callTool('listWarehouseStock', { warehouseId: wh })) as {
+      const stock = (await this.mcp.callTool('listWarehouseStock', { warehouseId: wh }, null, true)) as {
         structuredContent?: { records?: Array<Record<string, unknown>> };
       };
       stockByWh.set(wh, (stock.structuredContent?.records ?? []) as Array<Record<string, unknown>>);
@@ -569,7 +569,7 @@ export class AgentsService {
     displayName: string,
     cfg: { warehouseId: string; threshold: number; autonomy: string; budget: number },
   ) {
-    const stock = (await this.mcp.callTool('listWarehouseStock', { warehouseId: cfg.warehouseId })) as {
+    const stock = (await this.mcp.callTool('listWarehouseStock', { warehouseId: cfg.warehouseId }, null, true)) as {
       structuredContent?: { records?: Array<Record<string, unknown>> };
     };
     const records = (stock.structuredContent?.records ?? []) as Array<Record<string, unknown>>;
@@ -803,7 +803,7 @@ export class AgentsService {
    */
   private async executePoFollowup(runId: string, userId: string, warehouseId: string) {
     const [pos, sup] = await Promise.all([
-      this.mcp.callTool('getPurchaseOrders', { warehouseId }),
+      this.mcp.callTool('getPurchaseOrders', { warehouseId }, null, true),
       this.mcp.callTool('getSuppliers', {}),
     ]);
     const supplierByName = new Map(
@@ -1029,7 +1029,7 @@ export class AgentsService {
 
   /** CYCLE-COUNT PLANNER (beta): proposes a weekly count checklist. */
   private async executeCycleCount(runId: string, userId: string, cfg: { warehouseId: string }) {
-    const stock = (await this.mcp.callTool('listWarehouseStock', { warehouseId: cfg.warehouseId })) as {
+    const stock = (await this.mcp.callTool('listWarehouseStock', { warehouseId: cfg.warehouseId }, null, true)) as {
       structuredContent?: { records?: Array<Record<string, unknown>> };
     };
     const records = stock.structuredContent?.records ?? [];
@@ -1140,7 +1140,7 @@ export class AgentsService {
       const stockByWh = new Map<string, Array<Record<string, unknown>>>();
       for (const wh of ['1010', '1020', '1030', '1040', '1050']) {
         try {
-          const stock = (await this.mcp.callTool('listWarehouseStock', { warehouseId: wh })) as {
+          const stock = (await this.mcp.callTool('listWarehouseStock', { warehouseId: wh }, null, true)) as {
             structuredContent?: { records?: Array<Record<string, unknown>> };
           };
           stockByWh.set(wh, (stock.structuredContent?.records ?? []) as Array<Record<string, unknown>>);
@@ -1206,14 +1206,14 @@ export class AgentsService {
       agents.push('forecast');
     }
 
-    const low = (await this.mcp.callTool('getLowStock', { warehouseId, threshold: 50 })) as {
+    const low = (await this.mcp.callTool('getLowStock', { warehouseId, threshold: 50 }, null, true)) as {
       structuredContent?: { records?: Array<Record<string, unknown>> };
     };
     if ((low.structuredContent?.records ?? []).length > 0) {
       agents.push('replenishment');
     }
 
-    const pos = (await this.mcp.callTool('getPurchaseOrders', { warehouseId })) as {
+    const pos = (await this.mcp.callTool('getPurchaseOrders', { warehouseId }, null, true)) as {
       structuredContent?: { records?: Array<Record<string, unknown>> };
     };
     const today = new Date().toISOString().slice(0, 10);
@@ -1229,7 +1229,7 @@ export class AgentsService {
     if (stockByWh?.has(warehouseId)) {
       records = stockByWh.get(warehouseId)!;
     } else {
-      const stock = (await this.mcp.callTool('listWarehouseStock', { warehouseId })) as {
+      const stock = (await this.mcp.callTool('listWarehouseStock', { warehouseId }, null, true)) as {
         structuredContent?: { records?: Array<Record<string, unknown>> };
       };
       records = (stock.structuredContent?.records ?? []) as Array<Record<string, unknown>>;
@@ -1322,7 +1322,7 @@ export class AgentsService {
         const thresholdMatch = /above (\d+)/.exec(run.goal_text);
         const threshold = thresholdMatch ? Number(thresholdMatch[1]) : 50;
         const [low, prs] = await Promise.all([
-          this.mcp.callTool('getLowStock', { warehouseId: run.warehouse_id, threshold }),
+          this.mcp.callTool('getLowStock', { warehouseId: run.warehouse_id, threshold }, null, true),
           this.mcp.callTool('getPurchaseRequisitions', { warehouseId: run.warehouse_id }),
         ]);
         const lowRecords = ((low.structuredContent as { records?: Array<Record<string, unknown>> })?.records ??
@@ -1423,8 +1423,8 @@ export class AgentsService {
    */
   async simulate(userId: string, warehouseId: string, threshold: number) {
     const [low, pos, prs] = await Promise.all([
-      this.mcp.callTool('getLowStock', { warehouseId, threshold }),
-      this.mcp.callTool('getPurchaseOrders', { warehouseId }),
+      this.mcp.callTool('getLowStock', { warehouseId, threshold }, null, true),
+      this.mcp.callTool('getPurchaseOrders', { warehouseId }, null, true),
       this.mcp.callTool('getPurchaseRequisitions', { warehouseId }),
     ]);
     const lowRecords = ((low.structuredContent as { records?: Array<Record<string, unknown>> })?.records ??

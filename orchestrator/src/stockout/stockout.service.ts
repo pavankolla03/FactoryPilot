@@ -56,9 +56,9 @@ export class StockoutService {
   /** Compute the risk list for a single warehouse. */
   private async warehouseRisks(warehouseId: string): Promise<StockoutRisk[]> {
     const [stockRes, trendRes, poRes, supRes] = await Promise.all([
-      this.mcp.callTool('listWarehouseStock', { warehouseId }).catch(() => null),
+      this.mcp.callTool('listWarehouseStock', { warehouseId }, null, true).catch(() => null),
       this.mcp.callTool('getDemandTrend', { warehouseId, days: 14, byProduct: true }).catch(() => null),
-      this.mcp.callTool('getPurchaseOrders', { warehouseId }).catch(() => null),
+      this.mcp.callTool('getPurchaseOrders', { warehouseId }, null, true).catch(() => null),
       this.mcp.callTool('getSuppliers', {}).catch(() => null),
     ]);
 
@@ -158,7 +158,7 @@ export class StockoutService {
     for (const [i, wh] of scoped.entries()) {
       if (perWarehouse[i].length === 0) {
         const hasStock = this.records(
-          await this.mcp.callTool('listWarehouseStock', { warehouseId: wh }).catch(() => null),
+          await this.mcp.callTool('listWarehouseStock', { warehouseId: wh }, null, true).catch(() => null),
         ).length;
         if (hasStock) {
           notAssessed.push({
