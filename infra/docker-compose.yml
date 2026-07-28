@@ -107,6 +107,8 @@ services:
       # Pinning to IPv4 keeps the iFlow calls working inside the container.
       NODE_OPTIONS: --no-network-family-autoselection
       PORT: 3000
+      # auto: demo plants disappear once SAP is connected. always|never to override.
+      DEMO_PLANTS: ${DEMO_PLANTS:-auto}
       AUTH_MODE: ${AUTH_MODE:-local}
       AUTH_JWT_SECRET: ${AUTH_JWT_SECRET:-change-me-in-prod}
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}

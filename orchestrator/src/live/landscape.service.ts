@@ -54,11 +54,24 @@ export class LandscapeService {
     }
 
     const plants: PlantInfo[] = livePlants.map((p) => ({ warehouseId: p, live: true, positions: 0 }));
-    // Keep demo plants visible so an unconnected install still works end to end.
-    for (const d of DEMO_PLANTS) {
-      if (!plants.some((p) => p.warehouseId === d)) {
-        plants.push({ warehouseId: d, live: false, positions: 0 });
+
+    // Demo plants exist so an unconnected install works end to end. Once SAP is
+    // connected they are the only simulator surface left in the product, and
+    // every insight that "worked" on them while failing on real plants traced
+    // back to their presence. So: keep them when nothing is connected, drop them
+    // once something is, and let DEMO_PLANTS override either way.
+    //   DEMO_PLANTS=always → keep even alongside live SAP (demos, screenshots)
+    //   DEMO_PLANTS=never  → never show, even with no connection
+    const mode = (process.env.DEMO_PLANTS || 'auto').toLowerCase();
+    const showDemo = mode === 'always' || (mode !== 'never' && livePlants.length === 0);
+    if (showDemo) {
+      for (const d of DEMO_PLANTS) {
+        if (!plants.some((p) => p.warehouseId === d)) {
+          plants.push({ warehouseId: d, live: false, positions: 0 });
+        }
       }
+    } else if (livePlants.length > 0 && mode !== 'never') {
+      this.logger.log(`Demo plants hidden — ${livePlants.length} live SAP plant(s) connected (DEMO_PLANTS=always to keep them)`);
     }
     plants.sort((a, b) => Number(b.live) - Number(a.live) || a.warehouseId.localeCompare(b.warehouseId));
     this.cache = { at: Date.now(), plants };
