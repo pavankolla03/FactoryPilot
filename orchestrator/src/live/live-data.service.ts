@@ -433,11 +433,19 @@ export class LiveDataService {
       return {
         structuredContent: {
           unavailable: true,
+          // `reason` instructs the model; `userMessage` is shown verbatim by the
+          // deterministic path. Relaying `reason` to a user surfaced "Tell the
+          // user this plainly…" in the chat window.
           reason:
             `Purchase orders cannot be listed per plant. The connected SAP iFlow serves purchase order ` +
             `HEADERS only, which carry no plant, material or quantity, so there is no way to tell which ` +
             `of them belong to plant ${warehouseId}. Tell the user this plainly and do not list or count ` +
             `purchase orders for this plant. Connecting an A_PurchaseOrderItem iFlow would enable it.`,
+          userMessage:
+            `I can't list purchase orders for plant ${warehouseId}. The connected SAP iFlow serves purchase ` +
+            `order **headers** only — they carry no plant, material or quantity, so there is no way to tell ` +
+            `which orders belong to this plant.\n\nConnecting an \`A_PurchaseOrderItem\` iFlow would enable it. ` +
+            `In the meantime I can list all purchase order headers across plants.`,
           purchaseOrderHeadersAvailableAcrossAllPlants: records.length,
           dataSource: 'sap-iflow (live)',
         },

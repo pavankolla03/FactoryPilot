@@ -8,8 +8,10 @@ const CASES = [
     must:[/100000|100,000/], mustNot:[/simulat/i] },
   { name:'plant 1710 (was invisible)', q:'how many distinct materials are in plant 1710?',
     must:[/\d{3}/], mustNot:[/1030/] },
-  { name:'demo plant flagged', q:'what stock is in warehouse 1040?',
-    must:[/simulat|demo/i] },
+  { name:'unknown plant refused', q:'what stock is in warehouse 1040?',
+    // 1040 is a demo plant, hidden once SAP is connected (Phase BA). Asking for
+    // it must say it is not in the landscape, not serve simulator rows.
+    must:[/not in the connected SAP landscape|no data for it/i] },
   { name:'PO cannot be plant-scoped', q:'how many open purchase orders in warehouse 1030?',
     mustNot:[/\d+\s+open purchase orders/i] , must:[/cannot|can't|unable|header|not available/i] },
   { name:'suppliers: real IDs, no invented names', q:'which suppliers do we buy from?',

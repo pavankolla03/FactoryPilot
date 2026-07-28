@@ -1625,9 +1625,6 @@ export class ChatService {
     if (/\b(move|transfer|adjust|reorder|create|draft|post|set|alert|remind|schedule)\b/.test(m)) {
       return null;
     }
-    if (plants.length !== 1) return null;
-    const warehouseId = plants[0];
-
     const fmt = (n: unknown) => Number(n ?? 0).toLocaleString();
     const run = async (tool: string, params: Record<string, unknown>) => {
       const { data } = await this.readToolWithCache(tool, params, user.id, user.orgId);
@@ -1638,6 +1635,100 @@ export class ChatService {
       /sim/i.test(String(sc.dataSource ?? ''))
         ? '\n\n_Simulated demo data — this plant has no live SAP feed._'
         : `\n\n_Live from SAP (${String(sc.dataSource ?? 'sap-iflow')})._`;
+
+    // ---- Questions that are not plant-scoped, handled before the plant check ----
+
+    // "which suppliers do we buy from"
+    if (/\bsupplier/.test(m) && !/\bscore|reliab|risk|perform/.test(m)) {
+      const { sc, detail } = await run('getSuppliers', {});
+      const rows = (sc.records as Array<Record<string, unknown>>) ?? [];
+      if (!rows.length) return null;
+      const table =
+        '| Supplier | Purchase orders |\n|---|---|\n' +
+        rows.slice(0, 20).map((r) => `| ${r.supplierId ?? r.name ?? '—'} | ${fmt(r.purchaseOrderCount)} |`).join('\n');
+      return {
+        text:
+          `**${fmt(sc.rowCount ?? rows.length)}** supplier(s) appear on purchase orders.\n\n${table}` +
+          (sc.note ? `\n\n_${String(sc.note)}_` : '') +
+          provenance(sc),
+        tool: 'getSuppliers',
+        detail,
+      };
+    }
+
+    // "purchase orders" — the tool refuses plant scoping here; relay that verbatim.
+    if (/\bpurchase order|\bpo\b|\bpos\b/.test(m)) {
+      // Any plant/warehouse mention counts, even one the landscape does not know
+      // (demo ids are hidden once SAP is connected). Otherwise a question about
+      // "warehouse 1030" fell through to the unscoped list and was answered with
+      // all 50 orders as though they belonged to it.
+      const namedScope = plants[0] ?? (/\b(?:plant|warehouse|wh)\s*([a-z0-9-]{3,})\b/.exec(m)?.[1] ?? null);
+      const { sc, detail } = await run('getPurchaseOrders', namedScope ? { warehouseId: namedScope } : {});
+      if (sc.unavailable) {
+        return {
+          text: String(sc.userMessage ?? sc.reason ?? 'Purchase orders cannot be scoped to a plant here.'),
+          tool: 'getPurchaseOrders',
+          detail,
+        };
+      }
+      const rows = (sc.records as Array<Record<string, unknown>>) ?? [];
+      if (!rows.length) return null;
+      const table =
+        '| PO | Supplier | Ordered | Type |\n|---|---|---|---|\n' +
+        rows.slice(0, 20).map((r) => `| ${r.poNumber ?? '—'} | ${r.supplier ?? '—'} | ${r.orderedAt ?? '—'} | ${r.orderType ?? '—'} |`).join('\n');
+      const total = Number(sc.rowCount ?? rows.length);
+      return {
+        text:
+          `**${total}** purchase order(s).\n\n${table}` +
+          (total > Math.min(20, rows.length) ? `\n\n_Showing ${Math.min(20, rows.length)} of ${total}._` : '') +
+          (sc.note ? `\n\n_${String(sc.note)}_` : '') +
+          provenance(sc),
+        tool: 'getPurchaseOrders',
+        detail,
+      };
+    }
+
+    // ---- Everything below needs exactly one named plant ----
+    // A plant-shaped id the landscape does not know (a hidden demo plant, or a
+    // typo) is worth answering directly rather than sending to the model, which
+    // would otherwise serve simulator rows for it or invent a reason.
+    if (plants.length === 0) {
+      const named = /\b(?:plant|warehouse|wh)\s*([a-z0-9-]{3,})\b/i.exec(message)?.[1];
+      if (named && /\b(stock|inventory|material|movement|summary|low)\b/.test(m)) {
+        const known = await this.landscape.plants(user.orgId).catch(() => []);
+        return {
+          text:
+            `Plant **${named}** is not in the connected SAP landscape, so I have no data for it.\n\n` +
+            `Available plants: ${known.map((p) => p.warehouseId).join(', ') || 'none — no SAP connection is active'}.`,
+          tool: 'listPlants',
+        };
+      }
+      return null;
+    }
+    if (plants.length !== 1) return null;
+    const warehouseId = plants[0];
+
+    // "goods movements in 1710"
+    if (/\b(movements?|moved|goods movements?|material documents?)\b/.test(m)) {
+      const { sc, detail } = await run('getRecentMovements', { warehouseId });
+      const rows = (sc.records as Array<Record<string, unknown>>) ?? [];
+      if (!rows.length) return null;
+      const table =
+        '| Document | Material | Location | Qty | Type | Direction |\n|---|---|---|---|---|---|\n' +
+        rows.slice(0, 20).map((r) =>
+          `| ${r.movementId ?? '—'} | ${r.materialId ?? '—'} | ${r.toLocation ?? r.fromLocation ?? '—'} | ${fmt(r.qty)} ${r.unit ?? ''} | ${r.movementType ?? '—'} | ${r.direction ?? '—'} |`,
+        ).join('\n');
+      const total = Number(sc.rowCount ?? rows.length);
+      return {
+        text:
+          `**${total}** goods movement(s) in plant **${warehouseId}**.\n\n${table}` +
+          (total > Math.min(20, rows.length) ? `\n\n_Showing ${Math.min(20, rows.length)} of ${total}._` : '') +
+          (sc.note ? `\n\n_${String(sc.note)}_` : '') +
+          provenance(sc),
+        tool: 'getRecentMovements',
+        detail,
+      };
+    }
 
     // "low stock in 1710" / "what is running low"
     if (/\b(low stock|running low|below threshold|understock)\b/.test(m)) {
