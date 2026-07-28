@@ -125,6 +125,12 @@ report what they could not assess and why. AY: a critic that cannot run is no
 longer treated as an approval — `autonomy:'act'` withholds execution and
 escalates; reorder quantities say when they are a 2x-threshold placeholder
 rather than demand-based.
+AZ: health/scenario stopped scoring absent data as good; the AM row budget was
+corrupting six analytics services (they now pass `full`). BA: `DEMO_PLANTS`
+(auto|always|never) — demo plants disappear once SAP is connected, which is what
+made stockout/health/ESG report on simulator plants. BB: suppliers, purchase
+orders, movements and unknown-plant answers are deterministic too — the whole
+otto-suite passes with no model available.
 Roadmaps in `docs/`. **`npm run otto-suite` is the end-to-end check** — eight
 live cases against the running stack; run it after touching plant handling,
 tool descriptions or the live/simulator split. On a spent free-tier quota the
