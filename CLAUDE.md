@@ -104,7 +104,14 @@ AT: real cost accounting (`llm/model-pricing.ts`, `token_usage.cost_usd`).
 AU: registry validation — `POST /api/admin/business-objects/validate-all` checks
 every configured field against a live preview. Run it after any registry or
 iFlow change; it has caught three silent misconfigurations so far.
-Roadmaps in `docs/`.
+AV: plant ids come from the landscape, not a regex; demo plants say so in the
+answer text; "plant N" is resolved to warehouseId in code because the model
+would not equate the two. AW: lookups (stock / low stock / summary / material)
+are rendered deterministically with no model call — 21s and one free-tier
+request became ~40ms and zero. Anything analytical still goes to the agent loop.
+Roadmaps in `docs/`. **`npm run otto-suite` is the end-to-end check** — eight
+live cases against the running stack; run it after touching plant handling,
+tool descriptions or the live/simulator split.
 
 Branch: `version4`. Commits: `Phase <X>: …`.
 
