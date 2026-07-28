@@ -15,7 +15,8 @@ type Risk = {
   recommendedOrderQty: number;
   severity: 'critical' | 'high' | 'watch';
 };
-type RadarData = { risks: Risk[]; summary: { critical: number; high: number; uncovered: number } };
+type RadarData = {
+  notAssessed?: Array<{ warehouseId: string; reason: string }>; risks: Risk[]; summary: { critical: number; high: number; uncovered: number } };
 
 const SEV_TEXT: Record<Risk['severity'], string> = {
   critical: 'text-fp-bad',

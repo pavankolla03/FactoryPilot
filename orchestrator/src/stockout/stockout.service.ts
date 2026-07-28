@@ -143,8 +143,33 @@ export class StockoutService {
   }
 
   /** Ranked radar across a user's in-scope warehouses (soonest, uncovered first). */
-  async radar(user: AuthUser): Promise<{ risks: StockoutRisk[]; summary: { critical: number; high: number; uncovered: number } }> {
-    const perWarehouse = await Promise.all((await this.scopedWarehouses(user)).map((wh) => this.warehouseRisks(wh)));
+  async radar(user: AuthUser): Promise<{
+    risks: StockoutRisk[];
+    summary: { critical: number; high: number; uncovered: number };
+    notAssessed: Array<{ warehouseId: string; reason: string }>;
+  }> {
+    // Stockout risk is days-of-cover, which needs consumption history. The
+    // connected SAP feed has no posting timestamps, so live plants produce no
+    // demand series and silently dropped out of the radar — leaving only demo
+    // plants on screen, which reads as "your SAP plants are all healthy".
+    const scoped = await this.scopedWarehouses(user);
+    const perWarehouse = await Promise.all(scoped.map((wh) => this.warehouseRisks(wh)));
+    const notAssessed: Array<{ warehouseId: string; reason: string }> = [];
+    for (const [i, wh] of scoped.entries()) {
+      if (perWarehouse[i].length === 0) {
+        const hasStock = this.records(
+          await this.mcp.callTool('listWarehouseStock', { warehouseId: wh }).catch(() => null),
+        ).length;
+        if (hasStock) {
+          notAssessed.push({
+            warehouseId: wh,
+            reason:
+              'no consumption history — the connected SAP material-document feed carries no posting date, ' +
+              'so days-of-cover cannot be calculated for this plant',
+          });
+        }
+      }
+    }
     const all: StockoutRisk[] = perWarehouse.flat();
     all.sort((a, b) => Number(a.covered) - Number(b.covered) || a.daysToStockout - b.daysToStockout);
     return {
@@ -154,6 +179,7 @@ export class StockoutService {
         high: all.filter((r) => r.severity === 'high').length,
         uncovered: all.filter((r) => !r.covered).length,
       },
+      notAssessed,
     };
   }
 

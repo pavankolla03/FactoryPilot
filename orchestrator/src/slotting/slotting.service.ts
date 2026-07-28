@@ -50,7 +50,14 @@ export class SlottingService {
     }
   }
 
-  async proposals(warehouseId: string): Promise<{ warehouseId: string; window: string; proposals: SlottingProposal[] }> {
+  async proposals(
+    warehouseId: string,
+  ): Promise<{
+    warehouseId: string;
+    window: string;
+    proposals: SlottingProposal[];
+    unavailableReason?: string;
+  }> {
     const [stockRes, moves] = await Promise.all([
       this.mcp.callTool('listWarehouseStock', { warehouseId }).catch(() => null),
       this.fetchMovements(warehouseId),
@@ -118,6 +125,19 @@ export class SlottingService {
     }
 
     proposals.sort((a, b) => b.picks - a.picks);
-    return { warehouseId, window: '7 days', proposals };
+    return { warehouseId, window: '7 days', proposals,
+      // Slotting ranks fast movers by pick frequency, which needs dated
+      // movements. The connected SAP material-document feed has no posting
+      // timestamp, so a live plant yields no picks and returned a silent empty
+      // list that read as "nothing to improve here".
+      ...(proposals.length === 0 && stock.length > 0
+        ? {
+            unavailableReason:
+              'No pick history is available for this plant. The connected SAP material-document feed carries ' +
+              'no posting date, so movements cannot be counted over a time window. Connecting a movement feed ' +
+              'with PostingDate would enable slotting analysis.',
+          }
+        : {}),
+    };
   }
 }

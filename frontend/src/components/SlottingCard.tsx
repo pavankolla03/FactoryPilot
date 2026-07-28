@@ -30,6 +30,8 @@ export function SlottingCard({
   const plants = usePlants(client);
   const [warehouseId, setWarehouseId] = useState('1010');
   const [rows, setRows] = useState<Proposal[] | null>(null);
+  // Why the list is empty, when the reason is a data gap rather than "nothing to do".
+  const [unavailable, setUnavailable] = useState<string | null>(null);
   const [error, setError] = useState(false);
   const [loading, setLoading] = useState(false);
   const [proposing, setProposing] = useState<string | null>(null);
@@ -39,6 +41,7 @@ export function SlottingCard({
     try {
       const res = await client.get(`/api/ops/slotting/${warehouseId}`);
       setRows(res.data.proposals);
+      setUnavailable(res.data.unavailableReason ?? null);
       setError(false);
     } catch {
       setError(true);
@@ -113,8 +116,15 @@ export function SlottingCard({
 
       {!rows && loading && <div className="py-4 text-center text-xs text-fp-ink-3">Analyzing pick frequency…</div>}
       {rows && rows.length === 0 && (
-        <div className="py-6 text-center text-xs text-fp-ink-3">
-          No relocation opportunities in WH {warehouseId} — fast movers are already on forward pick faces.
+        // "Already well slotted" and "we cannot tell" look identical on screen
+        // but mean opposite things, so an empty list only claims the former
+        // when the analysis actually ran.
+        <div
+          className={`py-6 text-center text-xs leading-relaxed ${
+            unavailable ? 'text-fp-warn' : 'text-fp-ink-3'
+          }`}
+        >
+          {unavailable ?? `No relocation opportunities in WH ${warehouseId} — fast movers are already on forward pick faces.`}
         </div>
       )}
 
