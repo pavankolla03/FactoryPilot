@@ -109,9 +109,15 @@ answer text; "plant N" is resolved to warehouseId in code because the model
 would not equate the two. AW: lookups (stock / low stock / summary / material)
 are rendered deterministically with no model call — 21s and one free-tier
 request became ~40ms and zero. Anything analytical still goes to the agent loop.
+AX: Insights that silently skipped live plants (stockout radar, slotting) now
+report what they could not assess and why. AY: a critic that cannot run is no
+longer treated as an approval — `autonomy:'act'` withholds execution and
+escalates; reorder quantities say when they are a 2x-threshold placeholder
+rather than demand-based.
 Roadmaps in `docs/`. **`npm run otto-suite` is the end-to-end check** — eight
 live cases against the running stack; run it after touching plant handling,
-tool descriptions or the live/simulator split.
+tool descriptions or the live/simulator split. On a spent free-tier quota the
+seven model-free cases still pass; only the PO case needs an LLM.
 
 Branch: `version4`. Commits: `Phase <X>: …`.
 
