@@ -92,9 +92,20 @@ export function StockoutRadarCard({
         </div>
       )}
 
+      {/* Plants the scan could not cover. Without this the card showed risks
+          from demo plants only and read as "your SAP plants are all healthy". */}
+      {data?.notAssessed?.length ? (
+        <div className="mb-3 rounded-xl bg-fp-warn-soft px-3 py-2 text-[11px] leading-relaxed text-fp-warn">
+          <strong>Not assessed ({data.notAssessed.length}):</strong>{' '}
+          {data.notAssessed.map((n) => n.warehouseId).join(', ')} — {data.notAssessed[0].reason}
+        </div>
+      ) : null}
+
       {data && data.risks.length === 0 && (
         <div className="py-6 text-center text-xs text-fp-ink-3">
-          No materials are projected to stock out within 30 days.
+          {data.notAssessed?.length
+            ? 'No plant in scope could be assessed — see above.'
+            : 'No materials are projected to stock out within 30 days.'}
         </div>
       )}
 
