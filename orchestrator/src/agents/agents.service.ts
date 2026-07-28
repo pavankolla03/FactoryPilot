@@ -312,7 +312,7 @@ export class AgentsService {
       await this.addStep(runId, 'info', 'Outside the warehouse change window — auto-act disabled, routing to approval.', 'ok');
     }
 
-    if (cfg.autonomy === 'act' && totalQty <= cfg.budget && !critic.flagged && withinWindow) {
+    if (cfg.autonomy === 'act' && totalQty <= cfg.budget && critic.available && !critic.flagged && withinWindow) {
       for (const s of suggestions) {
         const result = (await this.mcp.callTool('draftPurchaseRequisition', {
           materialId: s.materialId,
@@ -355,7 +355,9 @@ export class AgentsService {
     // propose (or act over budget / critic-flagged → escalate to human)
     const escalation =
       cfg.autonomy === 'act'
-        ? critic.flagged
+        ? !critic.available
+          ? ' Critic could not run, so the plan was not auto-executed — escalated to human approval.'
+          : critic.flagged
           ? ' Critic flagged the plan — escalated to human approval.'
           : ` Total ${totalQty} exceeds the daily budget of ${cfg.budget} — escalated to human approval.`
         : '';
@@ -984,7 +986,7 @@ export class AgentsService {
     suggestions: Suggestion[],
     pos: Array<Record<string, unknown>>,
     prs: Array<Record<string, unknown>>,
-  ): Promise<{ flagged: boolean; reason: string; detail: string }> {
+  ): Promise<{ flagged: boolean; reason: string; detail: string; available: boolean }> {
     try {
       const provider = await this.criticProvider(userId);
       const prompt =
@@ -998,12 +1000,21 @@ export class AgentsService {
       const text = (result.text || '').trim();
       if (/^FLAG/i.test(text)) {
         const reason = text.replace(/^FLAG:?\s*/i, '').slice(0, 160) || 'unspecified concern';
-        return { flagged: true, reason, detail: `Critic review (${result.modelUsed}): FLAGGED — ${reason}` };
+        return { flagged: true, reason, available: true, detail: `Critic review (${result.modelUsed}): FLAGGED — ${reason}` };
       }
-      return { flagged: false, reason: '', detail: `Critic review (${result.modelUsed}): plan approved.` };
+      return { flagged: false, reason: '', available: true, detail: `Critic review (${result.modelUsed}): plan approved.` };
     } catch (error) {
       const reason = error instanceof Error ? error.message : 'unavailable';
-      return { flagged: false, reason: '', detail: `Critic unavailable (${reason}) — proceeding without review.` };
+      // `available: false` is NOT the same as an approved plan. This used to
+      // return flagged:false, so a critic that could not run was recorded as a
+      // review that passed — and an autonomy:'act' agent wrote to SAP with no
+      // review at all. On the free tier that happens most days.
+      return {
+        flagged: false,
+        available: false,
+        reason,
+        detail: `Critic could not run (${reason}) — auto-execution withheld, routing to human approval.`,
+      };
     }
   }
 
