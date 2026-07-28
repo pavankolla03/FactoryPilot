@@ -361,6 +361,14 @@ export class ChatService {
       .map((p) => String(p.warehouseId))
       .filter((id) => new RegExp(`\\b${id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i').test(message));
 
+    // Pure lookups are answered from SAP without a model (Phase AW). Placed
+    // after plant resolution because it needs the plant, and before the tool
+    // catalogue is assembled because that is the expensive part.
+    const fast = await this.fastRetrieval(user, message, spokenPlants).catch(() => null);
+    if (fast) {
+      return this.emitFallbackText(user, convId, message, start, fast.text, [fast.tool], fast.detail);
+    }
+
     const defaultWarehouse = preferences.default_warehouse;
     const defaultIsDemo = defaultWarehouse ? demoPlantIds.includes(String(defaultWarehouse)) : false;
     const preferenceNote = Object.keys(preferences).length
@@ -1589,6 +1597,132 @@ export class ChatService {
         },
       );
     });
+  }
+
+  /**
+   * Retrieval-shaped questions answered straight from SAP, with no model call.
+   *
+   * "stock in plant 1710" is a lookup, not a reasoning task — the tool already
+   * returns structured rows and the model was only formatting them, at ~21s and
+   * one request against the OpenRouter daily cap. Rendering here makes those
+   * answers instant, free, and deterministic (a table cannot hallucinate).
+   *
+   * Returns null unless the question is unambiguously a lookup, so anything
+   * analytical still goes to the agent loop.
+   */
+  private async fastRetrieval(
+    user: AuthUser,
+    message: string,
+    plants: string[],
+  ): Promise<{ text: string; tool: string; detail?: ChatToolEvent['detail'] } | null> {
+    const m = message.trim().toLowerCase();
+
+    // Anything asking for judgement, cause or comparison needs the model.
+    if (/\b(why|explain|compare|should|recommend|suggest|analy|risk|forecast|predict|plan|best|worst|optimi|trend|versus|vs)\b/.test(m)) {
+      return null;
+    }
+    // Writes and multi-step requests are never fast-pathed.
+    if (/\b(move|transfer|adjust|reorder|create|draft|post|set|alert|remind|schedule)\b/.test(m)) {
+      return null;
+    }
+    if (plants.length !== 1) return null;
+    const warehouseId = plants[0];
+
+    const fmt = (n: unknown) => Number(n ?? 0).toLocaleString();
+    const run = async (tool: string, params: Record<string, unknown>) => {
+      const { data } = await this.readToolWithCache(tool, params, user.id, user.orgId);
+      const sc = (data as { structuredContent?: Record<string, unknown> })?.structuredContent ?? {};
+      return { sc, detail: this.toolDetail(data) };
+    };
+    const provenance = (sc: Record<string, unknown>) =>
+      /sim/i.test(String(sc.dataSource ?? ''))
+        ? '\n\n_Simulated demo data — this plant has no live SAP feed._'
+        : `\n\n_Live from SAP (${String(sc.dataSource ?? 'sap-iflow')})._`;
+
+    // "low stock in 1710" / "what is running low"
+    if (/\b(low stock|running low|below threshold|understock)\b/.test(m)) {
+      const { sc, detail } = await run('getLowStock', { warehouseId, threshold: 50 });
+      const rows = (sc.records as Array<Record<string, unknown>>) ?? [];
+      if (!rows.length) {
+        return { text: `Nothing is below the 50-unit threshold in plant **${warehouseId}**.${provenance(sc)}`, tool: 'getLowStock', detail };
+      }
+      const table =
+        '| Material | Location | Qty |\n|---|---|---|\n' +
+        rows.slice(0, 20).map((r) => `| ${r.materialId ?? '—'} | ${r.location ?? '—'} | ${fmt(r.quantity)} |`).join('\n');
+      const total = Number(sc.rowCount ?? rows.length);
+      return {
+        text:
+          `**${total}** material(s) are below 50 units in plant **${warehouseId}**.\n\n${table}` +
+          (total > rows.slice(0, 20).length ? `\n\n_Showing the ${Math.min(20, rows.length)} lowest of ${total}._` : '') +
+          provenance(sc),
+        tool: 'getLowStock',
+        detail,
+      };
+    }
+
+    // "summary of 1710" / "overview"
+    if (/\b(summary|overview|snapshot)\b/.test(m)) {
+      const { sc, detail } = await run('getWarehouseSummary', { warehouseId });
+      const byLoc = (sc.byLocation as Record<string, number>) ?? {};
+      const locLines = Object.entries(byLoc)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 8)
+        .map(([loc, qty]) => `- **${loc}** — ${fmt(qty)}`)
+        .join('\n');
+      return {
+        text:
+          `Plant **${warehouseId}** holds **${fmt(sc.totalQuantity)}** units across ` +
+          `**${fmt(sc.distinctMaterials)}** distinct materials.\n\n${locLines}` +
+          (sc.note ? `\n\n_${String(sc.note)}_` : '') +
+          provenance(sc),
+        tool: 'getWarehouseSummary',
+        detail,
+      };
+    }
+
+    // "stock of MATERIAL in 1710"
+    // A material id always carries a digit (MZ-CH-LM09, TG11, MAT-10023456).
+    // Matching "any word of 4+ chars" picked up the word "stock" itself.
+    const materialMatch = /\b([a-z][a-z0-9._-]*\d[a-z0-9._-]*|\d[a-z0-9._-]*[a-z][a-z0-9._-]*)\b/i.exec(
+      message.replace(new RegExp(`\\b${warehouseId}\\b`, 'g'), ''),
+    );
+    if (/\bstock\b/.test(m) && /\b(material|product|item)\b/.test(m) && materialMatch) {
+      const materialId = materialMatch[1];
+      const { sc, detail } = await run('getStockLevel', { materialId, warehouseId });
+      const rows = (sc.records as Array<Record<string, unknown>>) ?? [];
+      if (!rows.length) return null; // let the model handle a miss (wrong id, etc.)
+      const total = rows.reduce((sum, r) => sum + Number(r.quantity ?? 0), 0);
+      const where = rows.map((r) => `**${r.location}** (${fmt(r.quantity)})`).join(', ');
+      return {
+        text: `**${fmt(total)}** units of **${materialId}** in plant **${warehouseId}** — ${where}.${provenance(sc)}`,
+        tool: 'getStockLevel',
+        detail,
+      };
+    }
+
+    // "stock in 1710" / "what stock does 1710 hold"
+    if (/\bstock\b/.test(m) && !/\bmaterial\b/.test(m)) {
+      const { sc, detail } = await run('listWarehouseStock', { warehouseId });
+      const rows = (sc.records as Array<Record<string, unknown>>) ?? [];
+      if (!rows.length) return null;
+      const table =
+        '| Material | Location | Qty |\n|---|---|---|\n' +
+        rows.slice(0, 20).map((r) => `| ${r.materialId ?? '—'} | ${r.location ?? '—'} | ${fmt(r.quantity)} |`).join('\n');
+      const totals = sc.totals as { totalQuantity?: number; distinctMaterials?: number } | undefined;
+      const total = Number(sc.rowCount ?? rows.length);
+      return {
+        text:
+          `Plant **${warehouseId}** holds **${total}** stock position(s)` +
+          (totals?.totalQuantity ? `, **${fmt(totals.totalQuantity)}** units across **${fmt(totals.distinctMaterials)}** materials` : '') +
+          `.\n\n${table}` +
+          (total > rows.slice(0, 20).length ? `\n\n_Showing the ${Math.min(20, rows.length)} largest of ${total}._` : '') +
+          provenance(sc),
+        tool: 'listWarehouseStock',
+        detail,
+      };
+    }
+
+    return null;
   }
 
   /**
