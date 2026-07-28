@@ -285,6 +285,11 @@ export class BusinessObjectsService {
     fieldsReturned: number;
     issues: Array<{ field: string; setting: string; message: string }>;
     error?: string;
+    /** Which system answered the preview. */
+    dataSource?: string;
+    /** False when no iFlow serves this entity set, so the object is simulator-backed. */
+    live?: boolean;
+    warning?: string;
   }> {
     const row = await this.byId(user, id);
     if (!row) {
@@ -292,9 +297,11 @@ export class BusinessObjectsService {
     }
     const cfg = row!;
     let fields: string[] = [];
+    let dataSource = '';
     try {
       const preview = await this.preview(user, id);
       fields = preview.fields;
+      dataSource = preview.dataSource;
     } catch (error) {
       return {
         objectCode: cfg.object_code,
@@ -331,11 +338,24 @@ export class BusinessObjectsService {
             : `'${c.field}' is not returned by this endpoint`,
       }));
 
+    // A registered object with no iFlow bound to its entity set silently falls
+    // through to the simulator and still validated "OK" — DELIVERY, SALES and
+    // SHIPPING all did. Provenance belongs in the answer.
+    const live = /sap|iflow|s4hana/i.test(dataSource) && !/sim/i.test(dataSource);
     return {
       objectCode: cfg.object_code,
       entitySet: cfg.entity_set,
       ok: issues.length === 0,
       fieldsReturned: fields.length,
+      dataSource,
+      live,
+      ...(live
+        ? {}
+        : {
+            warning:
+              'No SAP iFlow serves this entity set, so this object answers from the simulator. ' +
+              'Deactivate it or connect an iFlow before relying on it.',
+          }),
       issues,
     };
   }
