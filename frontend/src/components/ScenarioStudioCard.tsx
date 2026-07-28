@@ -17,6 +17,8 @@ type Result = {
   warehouseId: string;
   scenario: { demandMultiplier: number; horizonDays: number; supplierDelayDays: number };
   summary: { materials: number; stockouts: number; atRisk: number; baselineStockouts: number; newStockouts: number; shortfallUnits: number };
+  unavailableReason?: string;
+  modelledMaterials?: number;
   materials: Material[];
 };
 
@@ -134,17 +136,34 @@ export function ScenarioStudioCard({ client }: { client: AxiosInstance }) {
         <Slider label={`Supplier delay +${delay} days`} value={delay} min={0} max={30} step={1} onChange={setDelay} />
       </div>
 
+      {/* Zero stockouts from an unmodelled scenario is not an all-clear. Without
+          this the tiles rendered green for a plant where daily demand is zero
+          for every material because no consumption history exists. */}
+      {result?.unavailableReason && (
+        <div className="mb-3 rounded-xl bg-fp-warn-soft px-3 py-2 text-[11px] leading-relaxed text-fp-warn">
+          <strong>Not simulated:</strong> {result.unavailableReason}
+        </div>
+      )}
+
       {s && (
         <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
-          <Tile label="Stockouts" value={String(s.stockouts)} tone={s.stockouts > 0 ? 'bad' : 'good'} />
+          <Tile
+            label="Stockouts"
+            value={result?.unavailableReason ? '—' : String(s.stockouts)}
+            tone={result?.unavailableReason ? 'muted' : s.stockouts > 0 ? 'bad' : 'good'}
+          />
           <Tile
             label="New vs baseline"
-            value={s.newStockouts > 0 ? `+${s.newStockouts}` : '0'}
-            note={`base ${s.baselineStockouts}`}
-            tone={s.newStockouts > 0 ? 'bad' : 'good'}
+            value={result?.unavailableReason ? '—' : s.newStockouts > 0 ? `+${s.newStockouts}` : '0'}
+            note={result?.unavailableReason ? 'not modelled' : `base ${s.baselineStockouts}`}
+            tone={result?.unavailableReason ? 'muted' : s.newStockouts > 0 ? 'bad' : 'good'}
           />
           <Tile label="At risk" value={String(s.atRisk)} tone={s.atRisk > 0 ? 'warn' : 'good'} />
-          <Tile label="Units short" value={s.shortfallUnits.toLocaleString()} tone={s.shortfallUnits > 0 ? 'bad' : 'good'} />
+          <Tile
+            label="Units short"
+            value={result?.unavailableReason ? '—' : s.shortfallUnits.toLocaleString()}
+            tone={result?.unavailableReason ? 'muted' : s.shortfallUnits > 0 ? 'bad' : 'good'}
+          />
         </div>
       )}
 
@@ -201,8 +220,11 @@ export function ScenarioStudioCard({ client }: { client: AxiosInstance }) {
   );
 }
 
-function Tile({ label, value, note, tone }: { label: string; value: string; note?: string; tone: 'good' | 'warn' | 'bad' }) {
-  const cls = tone === 'bad' ? 'text-fp-bad' : tone === 'warn' ? 'text-fp-warn' : 'text-fp-good';
+function Tile({ label, value, note, tone }: { label: string; value: string; note?: string; tone: 'good' | 'warn' | 'bad' | 'muted' }) {
+  // 'muted' renders a figure that was not computed — green would read as an
+  // all-clear the data does not support.
+  const cls =
+    tone === 'bad' ? 'text-fp-bad' : tone === 'warn' ? 'text-fp-warn' : tone === 'muted' ? 'text-fp-ink-3' : 'text-fp-good';
   return (
     <div className="rounded-xl border border-fp-line bg-fp-bg p-3">
       <div className="text-[10px] font-semibold uppercase tracking-wider text-fp-ink-3">{label}</div>

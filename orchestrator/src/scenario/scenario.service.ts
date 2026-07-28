@@ -30,6 +30,10 @@ export interface ScenarioResult {
     shortfallUnits: number;
   };
   materials: ScenarioMaterial[];
+  /** Set when demand is unavailable, so zero stockouts means "not modelled". */
+  unavailableReason?: string;
+  /** How many materials had a real demand series behind them. */
+  modelledMaterials?: number;
 }
 
 type Rec = Record<string, unknown>;
@@ -145,6 +149,14 @@ export class ScenarioService {
     const baselineStockouts = materials.filter((m) => m.baselineEndQty < 0).length;
     const shortfallUnits = materials.reduce((s, m) => s + (m.projectedEndQty < 0 ? -m.projectedEndQty : 0), 0);
 
+    // A demand scenario with no demand is not a safe scenario, it is no
+    // scenario. Plant 1710 returned 327 materials at dailyDemand 0 and a summary
+    // of "0 stockouts, 0 new stockouts, 0 shortfall" — indistinguishable from a
+    // modelled all-clear. Demand needs consumption history, which the connected
+    // SAP movement feed cannot provide (no posting date).
+    const modelled = materials.filter((m) => m.dailyDemand > 0).length;
+    const demandUnavailable = materials.length > 0 && modelled === 0;
+
     return {
       warehouseId,
       scenario: { demandMultiplier, horizonDays, supplierDelayDays },
@@ -156,6 +168,15 @@ export class ScenarioService {
         newStockouts: Math.max(0, stockouts - baselineStockouts),
         shortfallUnits,
       },
+      ...(demandUnavailable
+        ? {
+            unavailableReason:
+              `No consumption history exists for plant ${warehouseId}, so daily demand is zero for every ` +
+              'material and nothing was actually simulated. The zero stockout/shortfall figures mean ' +
+              '"not modelled", NOT "safe". Connecting a movement feed with PostingDate would enable this.',
+            modelledMaterials: 0,
+          }
+        : { modelledMaterials: modelled }),
       materials,
     };
   }
