@@ -37,6 +37,10 @@ export interface WarehouseEsg {
 }
 
 export interface EsgReport {
+  /** Always 'estimate' — these are modelled figures, never measured emissions. */
+  basis?: 'estimate';
+  /** How the numbers were derived, carried in the payload so Otto cannot quote them as fact. */
+  methodology?: string;
   warehouses: WarehouseEsg[];
   summary: {
     totalKg: number;
@@ -149,6 +153,15 @@ export class EsgService {
           .slice(0, 5),
         dailyTrend: [...trendByDay.entries()].map(([day, kg]) => ({ day, kg: Math.round(kg) })).sort((a, b) => a.day.localeCompare(b.day)),
       },
+      // The UI card says "estimated / illustrative"; the payload did not, so
+      // Otto could quote kg CO2e as measured fact. The factors below are
+      // constants in this file, not SAP sustainability data.
+      basis: 'estimate',
+      methodology:
+        'Emissions are ESTIMATES from illustrative activity factors held in FactoryPilot ' +
+        '(handling energy per move, mode/distance lookups per supplier country) applied to real ' +
+        'movement quantities. They are NOT measured emissions and NOT from SAP sustainability data. ' +
+        'Always present them as estimates and never as a reported carbon figure.',
     };
   }
 
