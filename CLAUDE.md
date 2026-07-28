@@ -36,6 +36,17 @@ UI http://localhost:5173 · API :3000 · iFlow :4000 · login `owner@factorypilo
   an LLM-free intent in `handleFallbackWithoutLlm` so it survives model outages.
 - **Frontend PWA service worker caches aggressively** — after a rebuild, unregister
   SW + clear caches in the browser or you'll see the old UI. Not a product bug.
+- **Verify the artifact, not the command.** `docker compose build` can fail while
+  `up -d` silently keeps serving the previous image, so a change typechecks,
+  "builds", and is not running. After a rebuild:
+  `docker exec orchestrator sh -c 'grep -c "<string from your change>" dist/<path>.js'`
+- **Use plain `npx tsc`, not `rtk npx tsc`** — the wrapper reported "No errors
+  found" on a file with a syntax error that raw tsc catches.
+- **Do not regex-edit JS/TS object literals** — repeated `,,` breakages came from
+  patching `return { … }` blocks that way. Read + Edit the exact text.
+- **Analytics must pass `full`** to `callTool`/`readToolWithCache`. The 30-row
+  budget caps what the LLM reads; health/stockout/slotting/scenario/alerts/agents
+  compute plant-wide ratios and need every row.
 - `graphify-out/` is generated (`graphify update .`) and **not** committed.
 - Verify live (curl the API / drive the UI), don't just typecheck.
 
