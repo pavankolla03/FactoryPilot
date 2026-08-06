@@ -1,0 +1,223 @@
+# FactoryPilot — production stack for a 1 GB VM (Oracle VM.Standard.E2.1.Micro).
+#
+# Differences from the dev compose:
+#   - approuter removed: it only has a role on SAP BTP, and it collides with
+#     macOS AirPlay on :5000 anyway.
+#   - No database or Redis ports published to the host. They are reachable only
+#     on the internal Docker network, so Postgres is not exposed to the internet.
+#   - Only Caddy binds to the host, on 80/443. It terminates TLS with a free
+#     Let's Encrypt certificate and proxies through to the app.
+#   - Memory limits per service. On a 1 GB box one runaway container otherwise
+#     takes the whole machine down; this makes the kernel kill the offender.
+#   - Secrets come from the environment, never from a committed file.
+#
+# Measured footprint of this stack: ~510 MB, leaving headroom on a 1 GB box.
+services:
+  caddy:
+    image: caddy:2-alpine
+    container_name: caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    environment:
+      SITE_ADDRESS: ${SITE_ADDRESS:?set SITE_ADDRESS, e.g. factorypilot.duckdns.org}
+    depends_on:
+      - orchestrator
+      - frontend
+    deploy:
+      resources:
+        limits:
+          memory: 64M
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: manufacturing-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: manufacturing_agent
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+      - ./db/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d manufacturing_agent"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+
+  redis:
+    image: redis:7-alpine
+    container_name: manufacturing-redis
+    restart: unless-stopped
+    # maxmemory keeps the cache from growing into the app's headroom; the LRU
+    # policy evicts old tool results rather than failing writes.
+    command: redis-server --maxmemory 64mb --maxmemory-policy allkeys-lru --save 60 1
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    deploy:
+      resources:
+        limits:
+          memory: 64M
+
+  iflow-simulator:
+    build:
+      context: ../integration-mocks/iflow-simulator
+      dockerfile: Dockerfile
+    image: factorypilot/iflow-simulator:latest
+    container_name: iflow-simulator
+    restart: unless-stopped
+    environment:
+      PORT: 4000
+      LEDGER_DIR: /data
+      LOG_LEVEL: warn
+    volumes:
+      - ledger_data:/data
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://localhost:4000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 80M
+
+  mcp-inventory:
+    build:
+      context: ../mcp-servers/mcp-inventory
+      dockerfile: Dockerfile
+    image: factorypilot/mcp-inventory:latest
+    container_name: mcp-inventory
+    restart: unless-stopped
+    environment:
+      PORT: 4001
+      IFLOW_BASE_URL: http://iflow-simulator:4000
+      IFLOW_CLIENT_ID: mock-client
+      IFLOW_CLIENT_SECRET: mock-secret
+      IFLOW_TOKEN_URL: http://iflow-simulator:4000/oauth/token
+      MCP_SHARED_SECRET: ${MCP_SHARED_SECRET:?set MCP_SHARED_SECRET}
+      LOG_LEVEL: warn
+    depends_on:
+      iflow-simulator:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 96M
+
+  mcp-warehouse-ops:
+    build:
+      context: ../mcp-servers/mcp-warehouse-ops
+      dockerfile: Dockerfile
+    image: factorypilot/mcp-warehouse-ops:latest
+    container_name: mcp-warehouse-ops
+    restart: unless-stopped
+    environment:
+      PORT: 4002
+      IFLOW_BASE_URL: http://iflow-simulator:4000
+      IFLOW_CLIENT_ID: mock-client
+      IFLOW_CLIENT_SECRET: mock-secret
+      IFLOW_TOKEN_URL: http://iflow-simulator:4000/oauth/token
+      REDIS_URL: redis://redis:6379
+      MCP_SHARED_SECRET: ${MCP_SHARED_SECRET:?set MCP_SHARED_SECRET}
+      LOG_LEVEL: warn
+    depends_on:
+      iflow-simulator:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 96M
+
+  orchestrator:
+    build:
+      context: ..
+      dockerfile: orchestrator/Dockerfile
+    image: factorypilot/orchestrator:latest
+    container_name: orchestrator
+    restart: unless-stopped
+    environment:
+      # Docker's NAT64 hands out unreachable 64:ff9b:: addresses for the SAP BTP
+      # hosts; Happy Eyeballs then stalls the TLS handshake until it times out.
+      # --max-old-space-size keeps V8 from growing into the box's headroom.
+      NODE_OPTIONS: --no-network-family-autoselection --max-old-space-size=320
+      PORT: 3000
+      NODE_ENV: production
+      LOG_LEVEL: warn
+
+      # No simulator plants in front of a customer.
+      DEMO_PLANTS: ${DEMO_PLANTS:-never}
+
+      AUTH_MODE: local
+      AUTH_JWT_SECRET: ${AUTH_JWT_SECRET:?set AUTH_JWT_SECRET — the dev default lets anyone forge an admin token}
+
+      DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD:?}@postgres:5432/manufacturing_agent
+      REDIS_URL: redis://redis:6379
+      CACHE_TTL_SECONDS: ${CACHE_TTL_SECONDS:-600}
+
+      IFLOW_BASE_URL: http://iflow-simulator:4000
+      MCP_SERVERS: '{"inventory":"http://mcp-inventory:4001","warehouse-ops":"http://mcp-warehouse-ops:4002"}'
+      MCP_SHARED_SECRET: ${MCP_SHARED_SECRET:?set MCP_SHARED_SECRET}
+
+      CORS_ALLOWED_ORIGINS: https://${SITE_ADDRESS:?}
+
+      LLM_PROVIDER: ${LLM_PROVIDER:-openrouter}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o-mini}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      LLM_ROUND_TIMEOUT_MS: ${LLM_ROUND_TIMEOUT_MS:-90000}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      mcp-inventory:
+        condition: service_started
+      mcp-warehouse-ops:
+        condition: service_started
+    deploy:
+      resources:
+        limits:
+          memory: 384M
+
+  frontend:
+    build:
+      context: ..
+      dockerfile: frontend/Dockerfile
+    image: factorypilot/frontend:latest
+    container_name: frontend
+    restart: unless-stopped
+    environment:
+      # Same-origin: Caddy proxies /api and /ws through to the orchestrator, so
+      # the browser never needs a second hostname and CORS stays simple.
+      VITE_API_BASE_URL: ""
+      VITE_WS_URL: ""
+    deploy:
+      resources:
+        limits:
+          memory: 224M
+
+volumes:
+  pg_data:
+  redis_data:
+  ledger_data:
+  caddy_data:
+  caddy_config:

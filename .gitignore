@@ -13,3 +13,4 @@ FactoryPilot-Client-Briefing.pdf
 
 # generated knowledge graph (regenerate with: graphify update .)
 graphify-out/
+infra/.env

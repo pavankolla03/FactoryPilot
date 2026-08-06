@@ -1,0 +1,49 @@
+# Caddy fetches and renews a free Let's Encrypt certificate automatically —
+# nothing to configure, no cron job, no certbot.
+{$SITE_ADDRESS} {
+	encode gzip
+
+	# Otto streams its answers over a WebSocket. Without this the chat appears
+	# to hang: the HTTP request succeeds, tokens never arrive.
+	@websocket {
+		header Connection *Upgrade*
+		header Upgrade websocket
+	}
+	handle /ws* {
+		reverse_proxy orchestrator:3000
+	}
+
+	handle /api/* {
+		reverse_proxy orchestrator:3000 {
+			# Live SAP answers can take a while on a free-tier model; the default
+			# 30s would cut off a legitimate reply mid-flight.
+			transport http {
+				response_header_timeout 180s
+				read_timeout 180s
+			}
+		}
+	}
+
+	handle /health {
+		reverse_proxy orchestrator:3000
+	}
+
+	# Everything else is the React app.
+	handle {
+		reverse_proxy frontend:5173
+	}
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "SAMEORIGIN"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-Server
+	}
+
+	log {
+		output stdout
+		format console
+		level WARN
+	}
+}
