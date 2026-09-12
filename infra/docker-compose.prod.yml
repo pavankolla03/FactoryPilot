@@ -201,7 +201,9 @@ services:
   frontend:
     build:
       context: ..
-      dockerfile: frontend/Dockerfile
+      # Static nginx build. The dev Dockerfile runs `npm run dev` (the Vite dev
+      # server) which is ~173 MB and re-transforms source per request.
+      dockerfile: frontend/Dockerfile.prod
     image: factorypilot/frontend:latest
     container_name: frontend
     restart: unless-stopped
@@ -213,7 +215,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 224M
+          memory: 64M
 
 volumes:
   pg_data:

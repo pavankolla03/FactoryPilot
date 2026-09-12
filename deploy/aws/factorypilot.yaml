@@ -1,0 +1,208 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  FactoryPilot — single-instance deployment. Creates a VPC with one public
+  subnet, a security group, an Elastic IP and an EC2 instance that bootstraps
+  Docker, pulls the repo and brings the stack up behind Caddy (automatic HTTPS).
+  Deliberately avoids a NAT Gateway (~$32/mo) and an ALB (~$18/mo): at this
+  scale neither earns its cost. Upgrade paths are in README.md.
+
+Parameters:
+  DomainName:
+    Type: String
+    Description: Fully-qualified name the app is served on, e.g. app.intelliops4.ai
+    AllowedPattern: '^[a-z0-9.-]+\.[a-z]{2,}$'
+  LlmProvider:
+    Type: String
+    Default: openrouter
+    AllowedValues: [openrouter, openai, anthropic, self-hosted]
+  LlmApiKey:
+    Type: String
+    NoEcho: true
+    Default: ''
+    Description: >
+      API key for the provider above. Readable from instance metadata by anything
+      running on the box — fine for a single-tenant demo, move to Secrets Manager
+      before multi-tenant production.
+  InstanceType:
+    Type: String
+    Default: t3.micro
+    AllowedValues: [t3.micro, t3.small, t4g.micro, t4g.small]
+    Description: t3.micro is Free Tier eligible. The stack needs ~370MB at rest.
+  SshKeyName:
+    Type: AWS::EC2::KeyPair::KeyName
+    Description: Existing EC2 key pair for SSH access
+  SshAllowedCidr:
+    Type: String
+    Default: 0.0.0.0/0
+    Description: Lock SSH to your own IP (e.g. 203.0.113.4/32). 0.0.0.0/0 is open to the world.
+  RepoUrl:
+    Type: String
+    Default: https://github.com/pavankolla03/FactoryPilot.git
+  RepoBranch:
+    Type: String
+    Default: version4
+  HostedZoneId:
+    Type: String
+    Default: ''
+    Description: Optional Route 53 hosted zone ID. Leave blank to manage DNS yourself.
+
+Conditions:
+  CreateDnsRecord: !Not [!Equals [!Ref HostedZoneId, '']]
+  IsArm: !Or [!Equals [!Ref InstanceType, t4g.micro], !Equals [!Ref InstanceType, t4g.small]]
+
+Mappings:
+  # Canonical's Ubuntu 22.04 LTS AMI aliases, resolved by SSM at launch so the
+  # template never carries a stale AMI id.
+  AmiAlias:
+    x86:
+      Path: '/aws/service/canonical/ubuntu/server/22.04/stable/current/amd64/hvm/ebs-gp2/ami-id'
+    arm:
+      Path: '/aws/service/canonical/ubuntu/server/22.04/stable/current/arm64/hvm/ebs-gp2/ami-id'
+
+Resources:
+  Vpc:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.0.0.0/16
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags: [{ Key: Name, Value: !Sub '${AWS::StackName}-vpc' }]
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags: [{ Key: Name, Value: !Sub '${AWS::StackName}-igw' }]
+
+  AttachGateway:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref Vpc
+      InternetGatewayId: !Ref InternetGateway
+
+  PublicSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Vpc
+      CidrBlock: 10.0.1.0/24
+      AvailabilityZone: !Select [0, !GetAZs '']
+      MapPublicIpOnLaunch: true
+      Tags: [{ Key: Name, Value: !Sub '${AWS::StackName}-public' }]
+
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref Vpc
+
+  DefaultRoute:
+    Type: AWS::EC2::Route
+    DependsOn: AttachGateway
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  SubnetRouteAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet
+      RouteTableId: !Ref PublicRouteTable
+
+  SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: FactoryPilot web + ssh
+      VpcId: !Ref Vpc
+      SecurityGroupIngress:
+        - { IpProtocol: tcp, FromPort: 80,  ToPort: 80,  CidrIp: 0.0.0.0/0, Description: 'HTTP (Let''s Encrypt validation + redirect)' }
+        - { IpProtocol: tcp, FromPort: 443, ToPort: 443, CidrIp: 0.0.0.0/0, Description: 'HTTPS' }
+        - { IpProtocol: tcp, FromPort: 22,  ToPort: 22,  CidrIp: !Ref SshAllowedCidr, Description: 'SSH' }
+      Tags: [{ Key: Name, Value: !Sub '${AWS::StackName}-sg' }]
+
+  ElasticIp:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+      InstanceId: !Ref Instance
+
+  Instance:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: !Ref InstanceType
+      KeyName: !Ref SshKeyName
+      ImageId: !Sub
+        - '{{resolve:ssm:${Path}}}'
+        - Path: !If [IsArm, !FindInMap [AmiAlias, arm, Path], !FindInMap [AmiAlias, x86, Path]]
+      SubnetId: !Ref PublicSubnet
+      SecurityGroupIds: [!Ref SecurityGroup]
+      BlockDeviceMappings:
+        - DeviceName: /dev/sda1
+          Ebs: { VolumeSize: 30, VolumeType: gp3, DeleteOnTermination: true }
+      Tags: [{ Key: Name, Value: !Sub '${AWS::StackName}' }]
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          set -euxo pipefail
+          exec > >(tee /var/log/factorypilot-bootstrap.log) 2>&1
+
+          # Image builds need more than 1GB on t3.micro; swap is free headroom.
+          fallocate -l 4G /swapfile
+          chmod 600 /swapfile
+          mkswap /swapfile
+          swapon /swapfile
+          echo '/swapfile none swap sw 0 0' >> /etc/fstab
+
+          apt-get update -y
+          apt-get install -y git ca-certificates curl
+          curl -fsSL https://get.docker.com | sh
+          usermod -aG docker ubuntu
+
+          git clone --branch ${RepoBranch} --depth 1 ${RepoUrl} /opt/factorypilot
+          cd /opt/factorypilot/infra
+
+          # Secrets are generated here rather than passed in as parameters, so
+          # they never appear in the template, the console, or CloudFormation
+          # events. Only the LLM key comes from outside.
+          cat > .env <<ENVEOF
+          SITE_ADDRESS=${DomainName}
+          AUTH_JWT_SECRET=$(openssl rand -base64 32)
+          POSTGRES_PASSWORD=$(openssl rand -base64 32)
+          MCP_SHARED_SECRET=$(openssl rand -base64 32)
+          LLM_PROVIDER=${LlmProvider}
+          OPENROUTER_API_KEY=${LlmApiKey}
+          OPENAI_API_KEY=${LlmApiKey}
+          ANTHROPIC_API_KEY=${LlmApiKey}
+          DEMO_PLANTS=never
+          CACHE_TTL_SECONDS=600
+          LLM_ROUND_TIMEOUT_MS=90000
+          ENVEOF
+          chmod 600 .env
+          chown -R ubuntu:ubuntu /opt/factorypilot
+
+          # Caddy cannot obtain a certificate until DNS points here, so a first
+          # boot before the A record exists will retry rather than fail outright.
+          docker compose -f docker-compose.prod.yml up -d --build
+
+          echo "bootstrap complete" > /var/log/factorypilot-ready
+
+  DnsRecord:
+    Type: AWS::Route53::RecordSet
+    Condition: CreateDnsRecord
+    Properties:
+      HostedZoneId: !Ref HostedZoneId
+      Name: !Ref DomainName
+      Type: A
+      TTL: 300
+      ResourceRecords: [!Ref ElasticIp]
+
+Outputs:
+  PublicIp:
+    Description: Point your DNS A record at this address
+    Value: !Ref ElasticIp
+  SiteUrl:
+    Description: Available once DNS resolves and Caddy has issued a certificate
+    Value: !Sub 'https://${DomainName}'
+  SshCommand:
+    Value: !Sub 'ssh -i <your-key>.pem ubuntu@${ElasticIp}'
+  BootstrapLog:
+    Description: Watch the first boot
+    Value: 'sudo tail -f /var/log/factorypilot-bootstrap.log'
